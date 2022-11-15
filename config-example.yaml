@@ -1,0 +1,43 @@
+gitlab:
+  projects: "./gitlab/projects"
+  workers: 10
+
+github:
+  projects: "./github/projects"
+  workflows: "./github/workflows"
+  workers: 10
+  pagesize: 10
+
+sonarqube:
+  projects: "./sonarqube/projects"
+  issues: "./sonarqube/issues"
+
+registry:
+  images: "./registry/images"
+  commands: "./registry/commands"
+  workers: 10
+
+jenkins:
+  outputs: "./jenkins/outputs"
+  artifacts: "./jenkins/artifacts"
+
+nexus:
+  repositories: "./nexus/repositories"
+
+azure:
+  artifacts: "./azure/artifacts/"
+  projects: "./azure/projects/"
+  logs: "./azure/logs/"
+
+horusec:
+  path: "/path/to/horusec_binary"
+
+gitleaks:
+  path: "/path/to/gitleaks_binary"
+  results: "./gitleaks/"
+
+trufflehog:
+  path: "/path/to/trufflehog_binary"
+
+gitea:
+  projects: "./gitea/projects"

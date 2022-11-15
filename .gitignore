@@ -1,0 +1,47 @@
+/bin/
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Epyon config file
+config.yaml
+
+# Github files
+/github/
+
+# Nexus files
+/nexus/
+
+# Gitlab files
+/gitlab/
+
+# Sonarqube files
+/sonarqube/
+
+# Registry files
+/registry/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+/vendor/
+
+# Go workspace file
+go.work
+
+# Gitleaks JSON file
+gitleaks-issues.json
+
+# Gitleaks report file
+gitleaks-report.json
+
+# Horusec report file
+horusec-report.json
