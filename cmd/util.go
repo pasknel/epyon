@@ -35,8 +35,10 @@ var (
 )
 
 type GitlabConfig struct {
-	Projects string `mapstructure:"projects"`
-	Workers  int    `mapstructure:"workers"`
+	Projects  string `mapstructure:"projects"`
+	Outputs   string `mapstructure:"outputs"`
+	Workers   int    `mapstructure:"workers"`
+	Variables string `mapstructure:"variables"`
 }
 
 type GithubConfig struct {

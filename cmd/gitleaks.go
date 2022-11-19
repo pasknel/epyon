@@ -122,16 +122,21 @@ func ScanProjectFolder(projectID string) error {
 	}
 	defer projectFolder.Close()
 
-	projectFiles, err := projectFolder.ReadDir(1)
+	projectFiles, err := projectFolder.ReadDir(0)
 	if err != nil {
 		return fmt.Errorf("error listing project folder - err: %v", err)
 	}
 
-	if projectFiles[0].IsDir() {
-		path := filepath.Join(projectPath, projectFiles[0].Name())
-		if err := RunGitleaks(path); err != nil {
-			log.Error(err)
+	path := projectPath
+	if len(projectFiles) == 1 {
+		// Github projects
+		if projectFiles[0].IsDir() {
+			path = filepath.Join(projectPath, projectFiles[0].Name())
 		}
+	}
+
+	if err := RunGitleaks(path); err != nil {
+		log.Error(err)
 	}
 
 	return nil
@@ -155,7 +160,9 @@ var gitleaksCmd = &cobra.Command{
 		}
 
 		for _, pid := range projectIDs {
-			ScanProjectFolder(pid.Name())
+			if err := ScanProjectFolder(pid.Name()); err != nil {
+				log.Error(err)
+			}
 		}
 	},
 }
@@ -167,8 +174,7 @@ func init() {
 
 	var err error
 
-	GITLEAKS_PATH, err = GetConfigParam("gitleaks.path")
-	if err != nil {
+	if GITLEAKS_PATH, err = GetConfigParam("gitleaks.path"); err != nil {
 		log.Fatal(err)
 	}
 }

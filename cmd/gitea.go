@@ -92,25 +92,24 @@ func (g *GiteaClient) ListProjects() error {
 	return nil
 }
 
-func (g *GiteaClient) DownloadWorker(wg *sync.WaitGroup, repos chan string) {
+func (g *GiteaClient) DownloadWorker(wg *sync.WaitGroup, repos chan *gitea.Repository) {
 	defer wg.Done()
 
 	for r := range repos {
-		log.Printf("Downloading - Clone URL: %s", r)
+		log.Printf("[Gitea] Downloading - Clone URL: %s", r.CloneURL)
+		outdir := fmt.Sprintf("%s/%d", GITEA_PROJECTS, r.ID)
 		if len(GITEA_TOKEN) > 0 {
-			err := GitCloneWithToken(r, GITEA_TOKEN, GITEA_PROJECTS)
-			if err != nil {
+			if err := GitCloneWithToken(r.CloneURL, GITEA_TOKEN, outdir); err != nil {
 				log.Error(err)
 				continue
 			}
 		} else {
-			err := GitCloneWithUserPass(r, GITEA_USERNAME, GITEA_PASSWORD, GITEA_PROJECTS)
-			if err != nil {
+			if err := GitCloneWithUserPass(r.CloneURL, GITEA_USERNAME, GITEA_PASSWORD, outdir); err != nil {
 				log.Error(err)
 				continue
 			}
 		}
-
+		log.Printf("[Gitea] Download finished - Clone URL: %s", r.CloneURL)
 	}
 }
 
@@ -120,7 +119,7 @@ func (g *GiteaClient) DownloadRepos() error {
 	os.MkdirAll(GITEA_PROJECTS, os.ModePerm)
 
 	workers := 10
-	repos_chan := make(chan string)
+	repos_chan := make(chan *gitea.Repository)
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -136,7 +135,7 @@ func (g *GiteaClient) DownloadRepos() error {
 	}
 
 	for _, repo := range repos {
-		repos_chan <- repo.CloneURL
+		repos_chan <- repo
 	}
 
 	close(repos_chan)

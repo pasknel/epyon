@@ -1,4 +1,4 @@
-/bin/
+bin/
 
 # Binaries for programs and plugins
 *.exe
@@ -11,19 +11,19 @@
 config.yaml
 
 # Github files
-/github/
+github/
 
 # Nexus files
-/nexus/
+nexus/
 
 # Gitlab files
-/gitlab/
+gitlab/
 
 # Sonarqube files
-/sonarqube/
+sonarqube/
 
 # Registry files
-/registry/
+registry/
 
 # Test binary, built with `go test -c`
 *.test
@@ -32,7 +32,7 @@ config.yaml
 *.out
 
 # Dependency directories (remove the comment below to include it)
-/vendor/
+vendor/
 
 # Go workspace file
 go.work

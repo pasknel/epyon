@@ -116,10 +116,10 @@ func (j *JenkinsClient) DownloadArtifactsWorker(wg *sync.WaitGroup, builds chan 
 		buildNumber := build.GetBuildNumber()
 
 		url := strings.Split(build.Job.Raw.URL, "/job/")
-		outputDir := fmt.Sprintf("jenkins/artifacts/%s%d", strings.Join(url[1:len(url)], "/"), buildNumber)
+		outputDir := fmt.Sprintf("%s/%s%d", JENKINS_ARTIFACTS, strings.Join(url[1:], "/"), buildNumber)
 		err := os.MkdirAll(outputDir, 0777)
 		if err != nil {
-			log.Error("err: %s", err)
+			log.Errorf("err: %s", err)
 			continue
 		}
 
@@ -130,7 +130,7 @@ func (j *JenkinsClient) DownloadArtifactsWorker(wg *sync.WaitGroup, builds chan 
 			for _, art := range artifacts {
 				_, err := art.SaveToDir(j.ctx, outputDir)
 				if err != nil {
-					log.Error("err: %s", err)
+					log.Errorf("err: %s", err)
 					continue
 				}
 				log.Printf("Artifact downloaded: %s", art.FileName)
@@ -219,11 +219,11 @@ func (j *JenkinsClient) OutputWorker(wg *sync.WaitGroup, builds chan *gojenkins.
 		buildNumber := build.GetBuildNumber()
 
 		url := strings.Split(build.Job.Raw.URL, "/job/")
-		outputDir := fmt.Sprintf("jenkins/outputs/%s%d", strings.Join(url[1:len(url)], "/"), buildNumber)
+		outputDir := fmt.Sprintf("%s/%s%d", JENKINS_OUTPUTS, strings.Join(url[1:], "/"), buildNumber)
 
 		err := os.MkdirAll(outputDir, 0777)
 		if err != nil {
-			log.Error("error creating directory - err: %s", err)
+			log.Errorf("error creating directory - err: %s", err)
 			continue
 		}
 
@@ -231,7 +231,7 @@ func (j *JenkinsClient) OutputWorker(wg *sync.WaitGroup, builds chan *gojenkins.
 
 		output := build.GetConsoleOutput(j.ctx)
 
-		path := fmt.Sprintf("jenkins/outputs/%s/%d/output.txt", strings.Join(url[1:len(url)], "/"), buildNumber)
+		path := fmt.Sprintf("%s/%s/%d/output.txt", JENKINS_OUTPUTS, strings.Join(url[1:], "/"), buildNumber)
 		err = ioutil.WriteFile(path, []byte(output), 0644)
 		if err != nil {
 			log.Errorf("error getting output from build %d - job: %s - err: %s", buildNumber, jobName, err)
@@ -251,7 +251,7 @@ func (j *JenkinsClient) GetInnerJobs(job *gojenkins.Job, builds_chan chan *gojen
 	} else {
 		lastBuild, err := job.GetLastBuild(j.ctx)
 		if err != nil {
-			log.Error("error getting last build - err: %v", err)
+			log.Errorf("error getting last build - err: %v", err)
 			return
 		}
 

@@ -23,9 +23,11 @@
 * [x] Whoami
 * [x] List users
 * [x] List projects
-* [x] List variables
+* [x] List project variables
 * [x] Download projects
 * [x] Create backdoor token
+* [x] Get outputs from CI/CD jobs
+* [ ] Download artifacts from CI/CD jobs
 * [ ] Password Spray
 
 ## Sonarqube:

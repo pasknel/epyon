@@ -1,5 +1,7 @@
 gitlab:
   projects: "./gitlab/projects"
+  outputs: "./gitlab/outputs"
+  variables: "./gitlab/variables"
   workers: 10
 
 github:

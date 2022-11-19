@@ -25,6 +25,9 @@ var (
 	GITLAB_DOWNLOAD_METHOD string
 	GITLAB_TOKEN_USER_ID   int
 	GITLAB_PROJECTS        string
+	GITLAB_OUTPUTS         string
+	GITLAB_VARIABLES       string
+	GITLAB_LATEST_JOB      bool
 )
 
 type GitlabClient struct {
@@ -58,7 +61,7 @@ func NewGitlabClient(cmd *cobra.Command, args []string) {
 	GL = client
 }
 
-func (g *GitlabClient) Download(projects chan *gitlab.Project, wg *sync.WaitGroup) error {
+func (g *GitlabClient) DownloadWorker(projects chan *gitlab.Project, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	for p := range projects {
@@ -110,7 +113,7 @@ func (g *GitlabClient) DownloadProjects() error {
 
 	projects_chan := make(chan *gitlab.Project)
 	for i := 0; i < GITLAB_WORKERS; i++ {
-		go g.Download(projects_chan, &wg)
+		go g.DownloadWorker(projects_chan, &wg)
 	}
 
 	opt := &gitlab.ListProjectsOptions{
@@ -194,10 +197,10 @@ func (g *GitlabClient) ListProjectVariables() error {
 					continue
 				}
 
-				outdir := fmt.Sprintf("%s/%d", GITLAB_PROJECTS, project.ID)
+				outdir := fmt.Sprintf("%s/%d", GITLAB_VARIABLES, project.ID)
 				os.MkdirAll(outdir, os.ModePerm)
 
-				varsFile := fmt.Sprintf("%s/vars.json", outdir)
+				varsFile := fmt.Sprintf("%s/project_variables.json", outdir)
 				if err = ioutil.WriteFile(varsFile, projVarsBytes, 0644); err != nil {
 					log.Errorf("error creating JSON file - err: %v", err)
 				}
@@ -339,6 +342,109 @@ func (g *GitlabClient) Whoami() error {
 	return nil
 }
 
+func (g *GitlabClient) GetJobsOutputs() error {
+	log.Infof("[Gitlab] Server: %s - Listing Jobs Outputs", GITLAB_SERVER)
+
+	os.MkdirAll(GITLAB_OUTPUTS, os.ModePerm)
+
+	projects_chan := make(chan *gitlab.Project)
+
+	var wg sync.WaitGroup
+	wg.Add(GITLAB_WORKERS)
+
+	for i := 0; i < GITLAB_WORKERS; i++ {
+		go g.OutputWorker(projects_chan, &wg)
+	}
+
+	opt := &gitlab.ListProjectsOptions{
+		ListOptions: gitlab.ListOptions{
+			PerPage: 100,
+			Page:    1,
+		},
+	}
+
+	for {
+		projects, resp, err := g.git.Projects.ListProjects(opt)
+		if err != nil {
+			return fmt.Errorf("err: %v", err)
+		}
+
+		for _, p := range projects {
+			projects_chan <- p
+		}
+
+		if resp.CurrentPage >= resp.TotalPages {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	close(projects_chan)
+	wg.Wait()
+
+	return nil
+}
+
+func (g *GitlabClient) OutputWorker(projects chan *gitlab.Project, wg *sync.WaitGroup) error {
+	defer wg.Done()
+
+	for p := range projects {
+		jobs, _, err := g.git.Jobs.ListProjectJobs(p.ID, &gitlab.ListJobsOptions{})
+		if err != nil {
+			log.Errorf("error listing jobs - project: %s", p.Name)
+			continue
+		}
+
+		log.Printf("[Gitlab] Project: %s - Total of jobs: %d", p.Name, len(jobs))
+
+		for _, job := range jobs {
+			reader, _, err := g.git.Jobs.GetTraceFile(p.ID, job.ID)
+			if err != nil {
+				log.Errorf("error downloading trace file - project: %s - job: %d", p.ID, job.ID)
+				continue
+			}
+
+			data, err := ioutil.ReadAll(reader)
+			if err != nil {
+				log.Errorf("error reading output from CI/CD job - err: %s", err)
+				continue
+			}
+
+			outdir := fmt.Sprintf("%s/%d", GITLAB_OUTPUTS, p.ID)
+			os.Mkdir(outdir, os.ModePerm)
+
+			outfile := fmt.Sprintf("%s/job_%d_output.txt", outdir, job.ID)
+			if err := ioutil.WriteFile(outfile, data, 0644); err != nil {
+				log.Errorf("error saving job output - project: %s - job: %d - err: %v", p.Name, job.ID, err)
+				continue
+			}
+
+			log.Printf("[Gitlab] Output from CI/CD job saved - project: %s - job: %d", p.Name, job.ID)
+
+			if GITLAB_LATEST_JOB {
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+var gitlabGetOutputsCmd = &cobra.Command{
+	Use:    "get-outputs",
+	Short:  "Get Outputs from CI/CD Jobs",
+	Long:   `Get Outputs from CI/CD Jobs`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GL.GetJobsOutputs()
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 var gitlabListUsersCmd = &cobra.Command{
 	Use:    "list-users",
 	Short:  "List Gitlab Users",
@@ -445,6 +551,7 @@ func init() {
 	gitlabCmd.AddCommand(gitlabDownloadProjectsCmd)
 	gitlabCmd.AddCommand(gitlabCreateTokenCmd)
 	gitlabCmd.AddCommand(gitlabWhoamiCmd)
+	gitlabCmd.AddCommand(gitlabGetOutputsCmd)
 
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_SERVER, "server", "s", "", "Server Address")
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_USERNAME, "user", "u", "", "Username")
@@ -455,9 +562,19 @@ func init() {
 
 	gitlabCreateTokenCmd.Flags().IntVarP(&GITLAB_TOKEN_USER_ID, "id", "i", 0, "User ID")
 
+	gitlabGetOutputsCmd.Flags().BoolVarP(&GITLAB_LATEST_JOB, "latest", "l", false, "Get output from latest job")
+
 	var err error
 
 	if GITLAB_PROJECTS, err = GetConfigParam("gitlab.projects"); err != nil {
+		log.Fatal(err)
+	}
+
+	if GITLAB_OUTPUTS, err = GetConfigParam("gitlab.outputs"); err != nil {
+		log.Fatal(err)
+	}
+
+	if GITLAB_VARIABLES, err = GetConfigParam("gitlab.variables"); err != nil {
 		log.Fatal(err)
 	}
 
