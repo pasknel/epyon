@@ -122,8 +122,8 @@ func HorusecStart(path string) error {
 
 var horusecCmd = &cobra.Command{
 	Use:   "horusec",
-	Short: "Static source code anylsis with Horusec",
-	Long:  `Static source code anylsis with Horusec`,
+	Short: "Static source code analysis with Horusec",
+	Long:  `Static source code analysis with Horusec`,
 
 	Run: func(cmd *cobra.Command, args []string) {
 		rootDir, err := os.Open(HORUSEC_PROJECTS)

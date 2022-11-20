@@ -885,8 +885,8 @@ var githubDownloadOrgProjects = &cobra.Command{
 
 var githubCmd = &cobra.Command{
 	Use:   "github",
-	Short: "Interact with Github Actions",
-	Long:  "Options for Github Interaction",
+	Short: "Interact with Github (Enterprise and Actions)",
+	Long:  "Options for Github",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			cmd.Help()
