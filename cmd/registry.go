@@ -16,14 +16,15 @@ import (
 )
 
 var (
-	REGISTRY_SERVER   string
-	REGISTRY_USER     string
-	REGISTRY_PASS     string
-	IMAGE_NAME        string
-	IMAGE_LATEST      bool
-	REGISTRY_WORKERS  int
-	REGISTRY_IMAGES   string
-	REGISTRY_COMMANDS string
+	REGISTRY_SERVER      string
+	REGISTRY_USER        string
+	REGISTRY_PASS        string
+	IMAGE_NAME           string
+	IMAGE_LATEST         bool
+	REGISTRY_WORKERS     int
+	REGISTRY_IMAGES      string
+	REGISTRY_COMMANDS    string
+	REGISTRY_SERVER_TYPE string
 )
 
 type Repo struct {
@@ -43,14 +44,28 @@ type DockerfileHistory struct {
 	Command string `json:"v1Compatibility"`
 }
 
-type ContainerCmd struct {
+type RegistryContainerConfig struct {
+	Commands []string `json:"Cmd"`
+}
+
+type RegistryCommand struct {
+	Id        string                  `json:"id"`
+	Created   string                  `json:"created"`
+	Parent    string                  `json:"parent"`
+	Throwaway bool                    `json:"throwaway"`
+	Config    RegistryContainerConfig `json:"container_config"`
+}
+
+type NexusContainerConfig struct {
 	ContainerConfig string `json:"container_config"`
 }
 
-type DockerfileCommand struct {
-	Id      string       `json:"id"`
-	Created string       `json:"created"`
-	Cmd     ContainerCmd `json:"Cmd"`
+type NexusCommand struct {
+	Id        string               `json:"id"`
+	Created   string               `json:"created"`
+	Parent    string               `json:"parent"`
+	Throwaway bool                 `json:"throwaway"`
+	Cmd       NexusContainerConfig `json:"Cmd"`
 }
 
 type Tags struct {
@@ -285,29 +300,71 @@ func GetCommandHistory(image string, tag string) ([]string, error) {
 		return commands, fmt.Errorf("error in JSON decoding - err: %v", err)
 	}
 
-	for _, h := range manifest.History {
-		dc := DockerfileCommand{}
-
-		err := json.Unmarshal([]byte(h.Command), &dc)
-		if err != nil {
-			log.Errorf(fmt.Sprintf("error in JSON Unmarshal - err: %v", err))
-			continue
+	if len(REGISTRY_SERVER_TYPE) == 0 {
+		serverBanner := rsp.Header.Get("Server")
+		if strings.Contains(serverBanner, "Nexus") {
+			REGISTRY_SERVER_TYPE = "Nexus"
+		} else {
+			REGISTRY_SERVER_TYPE = "Docker Registry"
 		}
+	}
 
-		cmd := dc.Cmd.ContainerConfig
+	for _, h := range manifest.History {
+		if strings.Compare(REGISTRY_SERVER_TYPE, "Docker Registry") == 0 {
+			rc := RegistryCommand{}
 
-		prefix := []string{"/bin/sh -c #(nop)", "/bin/sh -c"}
-		for _, p := range prefix {
-			if strings.HasPrefix(cmd, p) {
-				cmd = strings.TrimPrefix(cmd, p)
-				cmd = strings.TrimSpace(cmd)
-				if strings.Compare(p, "/bin/sh -c") == 0 {
-					cmd = "RUN " + cmd
+			err := json.Unmarshal([]byte(h.Command), &rc)
+			if err != nil {
+				log.Errorf(fmt.Sprintf("error in JSON Unmarshal - err: %v", err))
+				continue
+			}
+
+			for _, cmd := range rc.Config.Commands {
+				prefix := []string{"/bin/sh -c #(nop)", "/bin/sh -c"}
+				for _, p := range prefix {
+					if strings.HasPrefix(cmd, p) {
+						cmd = strings.TrimPrefix(cmd, p)
+						cmd = strings.TrimSpace(cmd)
+						if strings.Compare(p, "/bin/sh -c") == 0 {
+							cmd = "RUN " + cmd
+						}
+					}
+				}
+
+				if VERBOSE {
+					log.WithFields(log.Fields{
+						"image":   image,
+						"tag":     tag,
+						"command": cmd,
+					}).Info("Dockerfile Command")
+				}
+
+				commands = append(commands, cmd)
+			}
+		} else {
+			nc := NexusCommand{}
+
+			err := json.Unmarshal([]byte(h.Command), &nc)
+			if err != nil {
+				log.Errorf(fmt.Sprintf("error in JSON Unmarshal - err: %v", err))
+				continue
+			}
+
+			cmd := nc.Cmd.ContainerConfig
+
+			prefix := []string{"/bin/sh -c #(nop)", "/bin/sh -c"}
+			for _, p := range prefix {
+				if strings.HasPrefix(cmd, p) {
+					cmd = strings.TrimPrefix(cmd, p)
+					cmd = strings.TrimSpace(cmd)
+					if strings.Compare(p, "/bin/sh -c") == 0 {
+						cmd = "RUN " + cmd
+					}
 				}
 			}
-		}
 
-		commands = append(commands, cmd)
+			commands = append(commands, cmd)
+		}
 	}
 
 	return commands, nil
