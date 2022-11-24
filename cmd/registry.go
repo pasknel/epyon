@@ -363,6 +363,14 @@ func GetCommandHistory(image string, tag string) ([]string, error) {
 				}
 			}
 
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"image":   image,
+					"tag":     tag,
+					"command": cmd,
+				}).Info("Dockerfile Command")
+			}
+
 			commands = append(commands, cmd)
 		}
 	}
