@@ -10,9 +10,6 @@ bin/
 # Epyon config file
 config.yaml
 
-# Github files
-github/
-
 # Nexus files
 nexus/
 
