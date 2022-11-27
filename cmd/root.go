@@ -15,6 +15,7 @@ var (
 	PROXY_SERVER string
 	PROXY_USER   string
 	PROXY_PASS   string
+	SOCKS_SERVER string
 )
 
 var rootCmd = &cobra.Command{
@@ -43,4 +44,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&PROXY_SERVER, "proxy-server", "X", "", "Proxy Server")
 	rootCmd.PersistentFlags().StringVarP(&PROXY_USER, "proxy-user", "U", "", "Proxy User")
 	rootCmd.PersistentFlags().StringVarP(&PROXY_PASS, "proxy-pass", "P", "", "Proxy Password")
+	rootCmd.PersistentFlags().StringVarP(&SOCKS_SERVER, "socks-server", "S", "", "SOCKS5 Server (ip:port)")
 }

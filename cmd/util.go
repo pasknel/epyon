@@ -21,6 +21,7 @@ import (
 	"github.com/jedib0t/go-pretty/table"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"golang.org/x/net/proxy"
 )
 
 var (
@@ -327,6 +328,14 @@ func NewHttpClient() (*http.Client, error) {
 			return client, fmt.Errorf("error parsing proxy url - err: %v", err)
 		}
 		tr.Proxy = http.ProxyURL(proxyURL)
+	}
+
+	if len(SOCKS_SERVER) > 0 {
+		dialer, err := proxy.SOCKS5("tcp", SOCKS_SERVER, nil, proxy.Direct)
+		if err != nil {
+			return client, fmt.Errorf("error creating socks dialer - err: %v", err)
+		}
+		tr.Dial = dialer.Dial
 	}
 
 	if SSL_INSECURE {

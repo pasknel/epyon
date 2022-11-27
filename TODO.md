@@ -78,8 +78,20 @@
 * [x] Horusec
 * [x] TruffleHog
 
-## Proxy Support:
+## HTTP Proxy Support:
+* [x] Github
 * [x] Gitlab
 * [x] Nexus
 * [x] Registry
+* [x] Sonarqube
 * [ ] Jenkins
+* [ ] Azure DevOps
+
+## SOCKS5 Proxy Support:
+* [x] Github
+* [x] Gitlab
+* [x] Nexus
+* [x] Registry
+* [x] Sonarqube
+* [ ] Jenkins
+* [ ] Azure DevOps
