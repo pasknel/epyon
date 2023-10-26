@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/google/go-github/v47/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jedib0t/go-pretty/table"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -59,7 +59,7 @@ func (g *GithubClient) ListOrgRepos(org string) error {
 	log.Infof("[Github] Listing repositories from org: %s", GITHUB_ORG)
 
 	opt := &github.RepositoryListByOrgOptions{
-		Type:        "public",
+		Type:        "all",
 		ListOptions: github.ListOptions{PerPage: GITHUB_PAGE_SIZE},
 	}
 
@@ -652,6 +652,82 @@ func (g *GithubClient) Whoami() error {
 	return nil
 }
 
+func (g *GithubClient) ListOrgVars() error {
+	log.Println("[Github] Listing Organization Variables")
+
+	opt := &github.ListOptions{
+		PerPage: 10,
+	}
+
+	header := table.Row{"NAME", "VALUE", "CREATED AT"}
+	results := []table.Row{}
+
+	for {
+		variables, rsp, err := g.Client.Actions.ListOrgVariables(GC.Ctx, GITHUB_ORG, opt)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, v := range variables.Variables {
+			results = append(results, table.Row{
+				v.Name,
+				v.Value,
+				v.CreatedAt,
+			})
+		}
+
+		if rsp.NextPage == 0 {
+			break
+		}
+
+		opt.Page = rsp.NextPage
+	}
+
+	if len(results) > 0 {
+		CreateTable(header, results)
+	}
+
+	return nil
+}
+
+func (g *GithubClient) ListOrgSecrets() error {
+	log.Println("[Github] Listing Organization Secrets")
+
+	opt := &github.ListOptions{
+		PerPage: 10,
+	}
+
+	header := table.Row{"NAME", "CREATED AT", "VISIBILITY"}
+	results := []table.Row{}
+
+	for {
+		secrets, rsp, err := g.Client.Actions.ListOrgSecrets(GC.Ctx, GITHUB_ORG, opt)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, secret := range secrets.Secrets {
+			results = append(results, table.Row{
+				secret.Name,
+				secret.CreatedAt,
+				secret.Visibility,
+			})
+		}
+
+		if rsp.NextPage == 0 {
+			break
+		}
+
+		opt.Page = rsp.NextPage
+	}
+
+	if len(results) > 0 {
+		CreateTable(header, results)
+	}
+
+	return nil
+}
+
 func (g *GithubClient) ListRepoSecrets() error {
 	log.Println("[Github] Listing Repositories Secrets")
 
@@ -674,6 +750,7 @@ func (g *GithubClient) ListRepoSecrets() error {
 			secrets, _, err := g.Client.Actions.ListRepoSecrets(g.Ctx, user.GetLogin(), r.GetName(), &github.ListOptions{})
 			if err != nil {
 				log.Errorf("error listing repository secrets - err: %v", err)
+				continue
 			}
 
 			header := table.Row{"REPOSITORY NAME", "SECRET NAME", "CREATED AT"}
@@ -699,6 +776,34 @@ func (g *GithubClient) ListRepoSecrets() error {
 	}
 
 	return nil
+}
+
+var githubListOrgSecrets = &cobra.Command{
+	Use:    "list-org-secrets",
+	Short:  "List Organization Secrets (requires admin privs)",
+	Long:   `List Organization Secrets (requires admin privs)`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.ListOrgSecrets()
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var githubListOrgVars = &cobra.Command{
+	Use:    "list-org-vars",
+	Short:  "List Organization Variables (requires admin privs)",
+	Long:   `List Organization Variables (requires admin privs)`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.ListOrgVars()
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
 }
 
 var githubListRepoSecrets = &cobra.Command{
@@ -911,6 +1016,8 @@ func init() {
 	githubCmd.AddCommand(githubListUserTeams)
 	githubCmd.AddCommand(githubWhoami)
 	githubCmd.AddCommand(githubListRepoSecrets)
+	githubCmd.AddCommand(githubListOrgSecrets)
+	githubCmd.AddCommand(githubListOrgVars)
 
 	githubCmd.PersistentFlags().StringVarP(&GITHUB_TOKEN, "token", "t", "", "Access Token")
 	githubListOrgRepos.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
@@ -918,6 +1025,8 @@ func init() {
 	githubListOrgWorkflows.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
 	githubDownloadOrgProjects.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
 	githubGetRunsLogs.PersistentFlags().BoolVarP(&GITHUB_LATEST_RUN, "latest", "l", false, "Get only latest run from each workflow")
+	githubListOrgSecrets.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
+	githubListOrgVars.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
 
 	var err error
 

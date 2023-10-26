@@ -1,113 +1,49 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/jedib0t/go-pretty/table"
+	"github.com/rs/zerolog"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
 var (
 	GITLEAKS_PROJECT string
-	GITLEAKS_PATH    string
-	GITLEAKS_REPORT  = "gitleaks-report.json"
-	GITLEAKS_ISSUES  = "gitleaks-issues.json"
 )
-
-type GitleaksJson struct {
-	Description string  `json:"Description"`
-	StartLine   int     `json:"StartLine"`
-	EndLine     int     `json:"EndLine"`
-	StartColumn int     `json:"StartColumn"`
-	EndColumn   int     `json:"EndColumn"`
-	Match       string  `json:"Match"`
-	Secret      string  `json:"Secret"`
-	File        string  `json:"File"`
-	Commit      string  `json:"Commit"`
-	Entropy     float64 `json:"Entropy"`
-	Author      string  `json:"Author"`
-	Email       string  `json:"Email"`
-	Date        string  `json:"Date"`
-	Message     string  `json:"Message"`
-	RuleID      string  `json:"RuleID"`
-}
-
-type GitleaksResults struct {
-	Project string
-	Issues  []GitleaksJson
-}
 
 func RunGitleaks(path string) error {
 	log.Printf("[Gitleaks] Scanning project: %s", path)
 
-	cmd := exec.Command(GITLEAKS_PATH, "detect", "--source", path, "-r", GITLEAKS_REPORT)
-	err := cmd.Run()
-
-	report, err := os.Open(GITLEAKS_REPORT)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("nothing found with gitleaks")
-	}
-	defer report.Close()
-
-	data, err := ioutil.ReadAll(report)
+	detector, err := detect.NewDetectorDefaultConfig()
 	if err != nil {
-		return fmt.Errorf("error reading gitleaks report file - err: %v", err)
+		return fmt.Errorf("error creating gitleaks detector - err: %v", err)
 	}
 
-	info := []GitleaksJson{}
-	err = json.Unmarshal(data, &info)
-	if err != nil {
-		return fmt.Errorf("error in JSON unmarshal - err: %v", err)
-	}
+	findings, _ := detector.DetectGit(path, "", detect.DetectType)
 
-	rows := []table.Row{}
-	header := table.Row{"DESCRIPTION", "FILE", "COMMIT", "SECRET"}
-
-	for _, i := range info {
-		rows = append(rows, table.Row{
-			i.Description,
-			i.File,
-			i.Commit,
-			i.Secret,
-		})
-	}
-
-	if len(rows) > 0 {
+	if len(findings) > 0 {
 		log.Printf("[Gitleaks] Issues found on: %s", path)
+
+		rows := []table.Row{}
+		header := table.Row{"DESCRIPTION", "FILE", "COMMIT", "SECRET"}
+
+		for _, f := range findings {
+			rows = append(rows, table.Row{
+				f.Description,
+				f.File,
+				f.Commit,
+				f.Secret,
+			})
+		}
+
 		CreateTable(header, rows)
-		fmt.Println()
-
-		gr := GitleaksResults{
-			Project: path,
-			Issues:  info,
-		}
-
-		grBytes, err := json.Marshal(gr)
-		if err != nil {
-			return fmt.Errorf("error in json marshal - err: %v", err)
-		}
-
-		logFile, err := os.OpenFile(GITLEAKS_ISSUES, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("error opening json file - err: %v", err)
-		}
-		defer logFile.Close()
-
-		_, err = logFile.Write(grBytes)
-		if err != nil {
-			return fmt.Errorf("error saving gitleaks results - err: %v", err)
-		}
 	}
-
-	report.Close()
-
-	os.Remove(GITLEAKS_REPORT)
 
 	return nil
 }
@@ -148,6 +84,9 @@ var gitleaksCmd = &cobra.Command{
 	Long:  `Scan projects folders with Gitleaks`,
 
 	Run: func(cmd *cobra.Command, args []string) {
+		// Disable debug messages created by gitleaks
+		zerolog.SetGlobalLevel(zerolog.Disabled)
+
 		rootDir, err := os.Open(GITLEAKS_PROJECT)
 		if err != nil {
 			log.Fatal(err)
@@ -171,10 +110,4 @@ func init() {
 	rootCmd.AddCommand(gitleaksCmd)
 
 	gitleaksCmd.Flags().StringVarP(&GITLEAKS_PROJECT, "projects", "p", "./gitlab/projects", "Path to Downloaded Projects")
-
-	var err error
-
-	if GITLEAKS_PATH, err = GetConfigParam("gitleaks.path"); err != nil {
-		log.Fatal(err)
-	}
 }

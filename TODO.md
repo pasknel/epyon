@@ -17,7 +17,8 @@
 * [x] List user repositories 
 * [x] List user teams
 * [x] List user workflows 
-* [ ] List organization secrets
+* [x] List organization secrets
+* [x] List organization variables
 
 ## Gitlab:
 * [x] Whoami
@@ -28,7 +29,7 @@
 * [x] Create backdoor token
 * [x] Get outputs from CI/CD jobs
 * [ ] Download artifacts from CI/CD jobs
-* [ ] Password Spray
+* [X] Password Spray
 
 ## Sonarqube:
 * [x] List users
@@ -62,7 +63,7 @@
 * [x] List builds
 * [x] Get output from builds
 * [x] Download artifacts from builds
-* [ ] List variables
+* [x] List variables
 * [ ] Password Spray
   
 ## Gitea:
@@ -71,6 +72,12 @@
 * [x] List projects
 * [x] Download projects
 * [ ] Password Spray
+
+## Artifactory:
+* [x] List repositories
+* [x] List files
+* [x] Download files
+* [x] Get info from docker images
 
 ## Integrations:
 * [x] Gitleaks (Gitlab / Gitea)

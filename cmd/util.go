@@ -73,21 +73,29 @@ type AzureConfig struct {
 	Artifacts string `mapstructure:"artifacts"`
 	Projects  string `mapstructure:"projects"`
 	Logs      string `mapstructure:"logs"`
+	Variables string `mapstructure:"variables"`
 }
 
 type GiteaConfig struct {
 	Projects string `mapstructure:"projects"`
 }
 
+type ArtifactoryConfig struct {
+	Repositories string `mapstructure:"repositories"`
+	Docker       string `mapstructure:"docker"`
+	Workers      int    `mapstructure:"workers"`
+}
+
 type EpyonConfig struct {
-	Gitlab    map[string]GitlabConfig    `mapstructure:"gitlab"`
-	Github    map[string]GithubConfig    `mapstructure:"github"`
-	Sonarqube map[string]SonarqubeConfig `mapstructure:"sonarqube"`
-	Registry  map[string]RegistryConfig  `mapstructure:"registry"`
-	Jenkins   map[string]JenkinsConfig   `mapstructure:"jenkins"`
-	Nexus     map[string]NexusConfig     `mapstructure:"nexus"`
-	Azure     map[string]AzureConfig     `mapstructure:"azure"`
-	Gitea     map[string]GiteaConfig     `mapstructure:"gitea"`
+	Gitlab      map[string]GitlabConfig      `mapstructure:"gitlab"`
+	Github      map[string]GithubConfig      `mapstructure:"github"`
+	Sonarqube   map[string]SonarqubeConfig   `mapstructure:"sonarqube"`
+	Registry    map[string]RegistryConfig    `mapstructure:"registry"`
+	Jenkins     map[string]JenkinsConfig     `mapstructure:"jenkins"`
+	Nexus       map[string]NexusConfig       `mapstructure:"nexus"`
+	Azure       map[string]AzureConfig       `mapstructure:"azure"`
+	Gitea       map[string]GiteaConfig       `mapstructure:"gitea"`
+	Artifactory map[string]ArtifactoryConfig `mapstructure:"artifactory"`
 }
 
 func CreateTable(header table.Row, results []table.Row) {

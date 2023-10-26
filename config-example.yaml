@@ -30,16 +30,17 @@ azure:
   artifacts: "./azure/artifacts/"
   projects: "./azure/projects/"
   logs: "./azure/logs/"
+  variables: "./azure/variables/"
 
 horusec:
   path: "/path/to/horusec_binary"
-
-gitleaks:
-  path: "/path/to/gitleaks_binary"
-  results: "./gitleaks/"
 
 trufflehog:
   path: "/path/to/trufflehog_binary"
 
 gitea:
   projects: "./gitea/projects"
+
+artifactory:
+  repositories: "./artifactory/repositories"
+  workers: 10

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -27,6 +28,7 @@ var (
 	AZURE_PROJECTS_DIR  string
 	AZURE_LOGS_DIR      string
 	AZURE_ARTIFACTS_DIR string
+	AZURE_VARIABLES_DIR string
 	AZ                  AzureClient
 )
 
@@ -391,6 +393,90 @@ func (ac *AzureClient) DownloadBuildsArtifacts() error {
 	return nil
 }
 
+func (ac *AzureClient) GetVariableGroups() error {
+	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	if err != nil {
+		return fmt.Errorf("err: %v", err)
+	}
+
+	for resp != nil {
+
+		for _, project := range (*resp).Value {
+			builds, err := ac.b.GetBuilds(ac.ctx, build.GetBuildsArgs{
+				Project: project.Name,
+			})
+
+			if err != nil {
+				log.Errorf("error getting builds from project: %s - err: %v", project.Name, err)
+				continue
+			}
+
+			for _, b := range builds.Value {
+				headers := table.Row{"PROJECT", "BUILD", "VARIABLE GROUP", "VARIABLE", "VALUE"}
+				results := []table.Row{}
+
+				log.Printf("Getting definition from project: %s - build: %s", *project.Name, *b.BuildNumber)
+
+				def, err := ac.b.GetDefinition(ac.ctx, build.GetDefinitionArgs{
+					Project:      project.Name,
+					DefinitionId: b.Definition.Id,
+				})
+
+				if err != nil {
+					log.Errorf("error getting build definition - err: %v", err)
+					continue
+				}
+
+				if def.VariableGroups != nil {
+					for _, varGroup := range *def.VariableGroups {
+						for k, v := range *varGroup.Variables {
+							results = append(results, table.Row{
+								*project.Name,
+								*b.BuildNumber,
+								*varGroup.Name,
+								k,
+								*v.Value,
+							})
+						}
+
+						projVarsBytes, err := json.Marshal(*varGroup.Variables)
+						if err != nil {
+							log.Errorf("error in JSON marshal - err: %v", err)
+							continue
+						}
+
+						outdir := fmt.Sprintf("%s/%s/%s", AZURE_VARIABLES_DIR, *project.Name, *b.BuildNumber)
+						os.MkdirAll(outdir, os.ModePerm)
+
+						varsFile := fmt.Sprintf("%s/variable_groups.json", outdir)
+						if err = ioutil.WriteFile(varsFile, projVarsBytes, 0644); err != nil {
+							log.Errorf("error creating JSON file - err: %v", err)
+						}
+					}
+
+					CreateTable(headers, results)
+					fmt.Println()
+				}
+			}
+		}
+
+		if resp.ContinuationToken != "" {
+			args := core.GetProjectsArgs{
+				ContinuationToken: &resp.ContinuationToken,
+			}
+
+			resp, err = ac.c.GetProjects(ac.ctx, args)
+			if err != nil {
+				return fmt.Errorf("err: %v", err)
+			}
+		} else {
+			resp = nil
+		}
+	}
+
+	return nil
+}
+
 func NewAzureClient(cmd *cobra.Command, args []string) {
 	var az AzureClient
 	var conn *azuredevops.Connection
@@ -541,6 +627,20 @@ var azureDownloadReposCmd = &cobra.Command{
 	},
 }
 
+var azureListVarGroupsCmd = &cobra.Command{
+	Use:    "list-var-groups",
+	Short:  "List variable groups",
+	Long:   `List variable groups`,
+	PreRun: NewAzureClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := AZ.GetVariableGroups()
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(azureCmd)
 
@@ -551,6 +651,7 @@ func init() {
 	azureCmd.AddCommand(azureListBuildsCmd)
 	azureCmd.AddCommand(azureGetBuildsCmd)
 	azureCmd.AddCommand(azureDownloadArtifactsCmd)
+	azureCmd.AddCommand(azureListVarGroupsCmd)
 
 	azureCmd.PersistentFlags().StringVarP(&AZURE_ORG_URL, "org", "o", "", "Organization URL (Ex: https://dev.azure.com/myorg)")
 	azureCmd.PersistentFlags().StringVarP(&AZURE_TOKEN, "token", "t", "", "Access Token")
@@ -566,6 +667,10 @@ func init() {
 	}
 
 	if AZURE_LOGS_DIR, err = GetConfigParam("azure.logs"); err != nil {
+		log.Fatal(err)
+	}
+
+	if AZURE_VARIABLES_DIR, err = GetConfigParam("azure.variables"); err != nil {
 		log.Fatal(err)
 	}
 }

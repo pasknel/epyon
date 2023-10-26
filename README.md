@@ -12,6 +12,7 @@ Available modules:
 6. Docker Registry
 7. Sonarqube
 8. Gitea
+9. Artifactory
 
 # Examples
 
