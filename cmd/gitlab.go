@@ -31,6 +31,8 @@ var (
 	GITLAB_VARIABLES       string
 	GITLAB_LATEST_JOB      bool
 	GITLAB_SPRAY_TIMEOUT   int
+	GITLAB_GROUP_ID        int
+	GITLAB_LIST_ALL        bool
 )
 
 type GitlabClient struct {
@@ -242,6 +244,14 @@ func (g *GitlabClient) ListUsers() error {
 		}
 
 		for _, user := range users {
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"id":       user.ID,
+					"username": user.Username,
+					"email":    user.Email,
+				}).Info("user found")
+			}
+
 			results = append(results, table.Row{user.ID, user.Username, user.Email, user.Name, user.IsAdmin, user.TwoFactorEnabled, user.External})
 		}
 
@@ -284,6 +294,225 @@ func (g *GitlabClient) ListProjects() error {
 				}).Info("Project found")
 			}
 			results = append(results, table.Row{project.ID, project.Name, project.WebURL})
+		}
+
+		if resp.CurrentPage >= resp.TotalPages {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	CreateTable(header, results)
+
+	return nil
+}
+
+func (g *GitlabClient) ListSnippets() error {
+	log.Infof("[Gitlab] Server: %s - Listing Snippets", GITLAB_SERVER)
+
+	opt := &gitlab.ListAllSnippetsOptions{
+		ListOptions: gitlab.ListOptions{
+			PerPage: 100,
+			Page:    1,
+		},
+	}
+
+	header := table.Row{"ID", "TITLE", "URL"}
+	results := []table.Row{}
+
+	for {
+		snippets, resp, err := g.git.Snippets.ListAllSnippets(opt)
+		if err != nil {
+			return fmt.Errorf("error listing snippets - err: %v", err)
+		}
+
+		for _, snippet := range snippets {
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"id":    snippet.ID,
+					"title": snippet.Title,
+					"url":   snippet.WebURL,
+				}).Info("snippet found")
+			}
+
+			results = append(results, table.Row{snippet.ID, snippet.Title, snippet.WebURL})
+		}
+
+		if resp.CurrentPage >= resp.TotalPages {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	CreateTable(header, results)
+
+	return nil
+}
+
+func (g *GitlabClient) ListGroups() error {
+	log.Infof("[Gitlab] Server: %s - Listing Groups", GITLAB_SERVER)
+
+	allAvailable := true
+	opt := &gitlab.ListGroupsOptions{
+		AllAvailable: &allAvailable,
+		ListOptions: gitlab.ListOptions{
+			PerPage: 100,
+			Page:    1,
+		},
+	}
+
+	header := table.Row{"ID", "NAME", "DESCRIPTION", "TOTAL OF PROJECTS"}
+	results := []table.Row{}
+
+	for {
+		groups, resp, err := g.git.Groups.ListGroups(opt)
+		if err != nil {
+			return fmt.Errorf("error listing groups - err: %v", err)
+		}
+
+		for _, group := range groups {
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"id":       group.ID,
+					"name":     group.Name,
+					"url":      group.WebURL,
+					"projects": len(group.Projects),
+				}).Info("group found")
+			}
+
+			results = append(results, table.Row{group.ID, group.Name, group.Description, len(group.Projects)})
+		}
+
+		if resp.CurrentPage >= resp.TotalPages {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	CreateTable(header, results)
+
+	return nil
+}
+
+func (g *GitlabClient) ListGroupsVariables() error {
+	log.Infof("[Gitlab] Server: %s - Listing Groups Variables", GITLAB_SERVER)
+
+	var gids []int
+
+	if GITLAB_LIST_ALL {
+		allAvailable := true
+		opt := &gitlab.ListGroupsOptions{
+			AllAvailable: &allAvailable,
+			ListOptions: gitlab.ListOptions{
+				PerPage: 100,
+				Page:    1,
+			},
+		}
+
+		for {
+			groups, resp, err := g.git.Groups.ListGroups(opt)
+			if err != nil {
+				return fmt.Errorf("error listing groups - err: %v", err)
+			}
+
+			for _, group := range groups {
+				gids = append(gids, group.ID)
+			}
+
+			if resp.CurrentPage >= resp.TotalPages {
+				break
+			}
+
+			opt.Page = resp.NextPage
+		}
+	} else {
+		gids = append(gids, GITLAB_GROUP_ID)
+	}
+
+	for _, groupID := range gids {
+		if err := g.GetGroupVariables(groupID); err != nil {
+			log.Error(err)
+		}
+
+		fmt.Println()
+	}
+
+	return nil
+}
+
+func (g *GitlabClient) GetGroupVariables(groupID int) error {
+	log.Infof("[Gitlab] Server: %s - Group: %d - Listing Group Variables", GITLAB_SERVER, groupID)
+
+	opt := &gitlab.ListGroupVariablesOptions{
+		PerPage: 100,
+		Page:    1,
+	}
+
+	header := table.Row{"KEY", "VALUE", "ENVIRONMENT SCOPE"}
+	results := []table.Row{}
+
+	for {
+		vars, resp, err := g.git.GroupVariables.ListVariables(groupID, opt)
+		if err != nil {
+			return fmt.Errorf("error listing group variables - err: %v", err)
+		}
+
+		for _, v := range vars {
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"group": groupID,
+					"key":   v.Key,
+					"value": v.Value,
+					"env":   v.EnvironmentScope,
+				}).Infof("variable found")
+			}
+
+			results = append(results, table.Row{v.Key, v.Value, v.EnvironmentScope})
+		}
+
+		if resp.CurrentPage >= resp.TotalPages {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	CreateTable(header, results)
+
+	return nil
+}
+
+func (g *GitlabClient) ListInstanceVars() error {
+	log.Infof("[Gitlab] Server: %s - Listing Instance Variables", GITLAB_SERVER)
+
+	opt := gitlab.ListInstanceVariablesOptions{
+		PerPage: 100,
+		Page:    1,
+	}
+
+	header := table.Row{"KEY", "VALUE"}
+	results := []table.Row{}
+
+	for {
+		vars, resp, err := g.git.InstanceVariables.ListVariables(&opt)
+		if err != nil {
+			return fmt.Errorf("error listing instance variables - err: %v", err)
+		}
+
+		for _, v := range vars {
+			if VERBOSE {
+				log.WithFields(log.Fields{
+					"key":       v.Key,
+					"value":     v.Value,
+					"masked":    v.Masked,
+					"protected": v.Protected,
+				}).Printf("variable found")
+			}
+
+			results = append(results, table.Row{v.Key, v.Value})
 		}
 
 		if resp.CurrentPage >= resp.TotalPages {
@@ -491,8 +720,7 @@ var gitlabGetOutputsCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.GetJobsOutputs()
-		if err != nil {
+		if err := GL.GetJobsOutputs(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -505,8 +733,20 @@ var gitlabListUsersCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.ListUsers()
-		if err != nil {
+		if err := GL.ListUsers(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var gitlabListGroupsCmd = &cobra.Command{
+	Use:    "list-groups",
+	Short:  "List Gitlab Groups",
+	Long:   `List Gitlab Groups`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GL.ListGroups(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -519,8 +759,7 @@ var gitlabListProjectsCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.ListProjects()
-		if err != nil {
+		if err := GL.ListProjects(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -533,8 +772,33 @@ var gitlabListVarsCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.ListProjectVariables()
-		if err != nil {
+		if err := GL.ListProjectVariables(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var gitlabListGroupVarsCmd = &cobra.Command{
+	Use:    "list-groups-vars",
+	Short:  "List Groups Variables",
+	Long:   `List Groups Variables`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GL.ListGroupsVariables(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var gitlabListInstanceVarsCmd = &cobra.Command{
+	Use:    "list-instance-vars",
+	Short:  "List Instance Variables",
+	Long:   `List Instance Variables`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GL.ListInstanceVars(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -547,8 +811,7 @@ var gitlabDownloadProjectsCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.DownloadProjects()
-		if err != nil {
+		if err := GL.DownloadProjects(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -561,8 +824,7 @@ var gitlabCreateTokenCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.CreateToken()
-		if err != nil {
+		if err := GL.CreateToken(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -575,8 +837,20 @@ var gitlabWhoamiCmd = &cobra.Command{
 	PreRun: NewGitlabClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := GL.Whoami()
-		if err != nil {
+		if err := GL.Whoami(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var gitlabListSnippetsCmd = &cobra.Command{
+	Use:    "list-snippets",
+	Short:  "List snippets",
+	Long:   `List snippets`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GL.ListSnippets(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -599,13 +873,17 @@ func init() {
 	rootCmd.AddCommand(gitlabCmd)
 
 	gitlabCmd.AddCommand(gitlabListUsersCmd)
+	gitlabCmd.AddCommand(gitlabListGroupsCmd)
 	gitlabCmd.AddCommand(gitlabListProjectsCmd)
 	gitlabCmd.AddCommand(gitlabListVarsCmd)
+	gitlabCmd.AddCommand(gitlabListGroupVarsCmd)
 	gitlabCmd.AddCommand(gitlabDownloadProjectsCmd)
 	gitlabCmd.AddCommand(gitlabCreateTokenCmd)
 	gitlabCmd.AddCommand(gitlabWhoamiCmd)
 	gitlabCmd.AddCommand(gitlabGetOutputsCmd)
 	gitlabCmd.AddCommand(gitlabSprayCmd)
+	gitlabCmd.AddCommand(gitlabListSnippetsCmd)
+	gitlabCmd.AddCommand(gitlabListInstanceVarsCmd)
 
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_SERVER, "server", "s", "", "Server Address")
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_USERNAME, "user", "u", "", "Username")
@@ -620,6 +898,9 @@ func init() {
 
 	gitlabSprayCmd.Flags().StringVarP(&GITLAB_USERLIST, "userlist", "x", "", "Userlist path")
 	gitlabSprayCmd.Flags().IntVarP(&GITLAB_SPRAY_TIMEOUT, "timeout", "n", 5, "Timeout between login attempts (seconds)")
+
+	gitlabListGroupVarsCmd.Flags().IntVarP(&GITLAB_GROUP_ID, "group", "g", 0, "Group ID")
+	gitlabListGroupVarsCmd.Flags().BoolVarP(&GITLAB_LIST_ALL, "all", "a", true, "List all groups")
 
 	var err error
 

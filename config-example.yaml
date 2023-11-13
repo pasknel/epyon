@@ -43,4 +43,5 @@ gitea:
 
 artifactory:
   repositories: "./artifactory/repositories"
+  docker: "./artifactory/docker"
   workers: 10

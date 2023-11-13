@@ -30,6 +30,9 @@
 * [x] Get outputs from CI/CD jobs
 * [ ] Download artifacts from CI/CD jobs
 * [X] Password Spray
+* [X] List groups
+* [X] List groups variables
+* [X] List instance variables
 
 ## Sonarqube:
 * [x] List users
