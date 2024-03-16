@@ -1,3 +1,16 @@
+## Terraform Cloud / Enterprise
+* [x] List organizations
+* [x] List agents
+* [x] List projects
+* [x] List teams
+* [x] List team members
+* [x] List variable sets
+* [x] List workspaces
+* [x] List workspace resources
+* [x] List workspace variables
+* [x] Download workspace state
+* [ ] List private registry
+
 ## Registry:
 * [x] List images
 * [x] List tags

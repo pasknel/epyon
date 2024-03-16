@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -61,8 +63,12 @@ type DownloadRequest struct {
 	URL     string
 }
 
-type ArtifactoryDockerManifests struct {
-	Manifests []string `json:"manifests"`
+type ArtifactoryManifestsResults struct {
+	Results []ArtifactoryManifestURI `json:"results"`
+}
+
+type ArtifactoryManifestURI struct {
+	URI string `json:"uri"`
 }
 
 func NewArtifactoryClient(cmd *cobra.Command, args []string) {
@@ -217,25 +223,25 @@ func (ac *ArtifactoryClient) DownloadWorker(files chan []string, wg *sync.WaitGr
 	return nil
 }
 
-func (ac *ArtifactoryClient) GetDockerManifests(repo_url string) (ArtifactoryDockerManifests, error) {
-	var manifests ArtifactoryDockerManifests
+func (ac *ArtifactoryClient) GetDockerManifests(repo string) (ArtifactoryManifestsResults, error) {
+	var manifests ArtifactoryManifestsResults
 
-	endpoint := fmt.Sprintf("%s/repository.catalog", repo_url)
+	endpoint := fmt.Sprintf("%s/%s/search/artifact?name=manifest.json&repos=%s", ARTIFACTORY_SERVER, ARTIFACTORY_API_URL, ARTIFACTORY_REPOSITORY)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
-		return manifests, fmt.Errorf("error creating GET request - err: %v", err)
+		return manifests, fmt.Errorf("error creating get request - err: %v", err)
 	}
 
 	rsp, err := ac.Client.Do(req)
 	if err != nil {
-		return manifests, fmt.Errorf("error in GET response - err: %v", err)
+		return manifests, fmt.Errorf("error sending request - err: %v", err)
 	}
 	defer rsp.Body.Close()
 
-	data, err := ioutil.ReadAll(rsp.Body)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return manifests, fmt.Errorf("error reading GET response - err: %v", err)
+		return manifests, fmt.Errorf("error reading response - err: %v", err)
 	}
 
 	if err := json.Unmarshal(data, &manifests); err != nil {
@@ -271,20 +277,20 @@ func (ac *ArtifactoryClient) GetArtifactoryDockerV2(key string, path string) err
 	}
 	defer rsp.Body.Close()
 
-	data, err := ioutil.ReadAll(rsp.Body)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
 		return fmt.Errorf("error reading GET response - err: %v", err)
 	}
 
-	outdir := fmt.Sprintf("%s/%s", ARTIFACTORY_DOCKER, path)
+	outdir := fmt.Sprintf("%s/%s/%s", ARTIFACTORY_DOCKER, key, path)
 	os.MkdirAll(outdir, os.ModePerm)
 
 	outpath := fmt.Sprintf("%s/dockerv2.json", outdir)
-	if err := ioutil.WriteFile(outpath, data, 0644); err != nil {
+	if err := os.WriteFile(outpath, data, 0644); err != nil {
 		return fmt.Errorf("error saving file - err: %v", err)
 	}
 
-	log.Printf("Download finished: %s", path)
+	log.Printf("[Artifactory] Download finished: %s", path)
 
 	return nil
 }
@@ -393,28 +399,26 @@ var artifactoryDockerInfo = &cobra.Command{
 	Long:   "Download info about docker images",
 	PreRun: NewArtifactoryClient,
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Info("[Artifactory] Listing docker repositories")
+		log.Infof("[Artifactory] Listing docker manifests - Repository: %s", ARTIFACTORY_REPOSITORY)
 
-		repos, err := ARTIFACTORY_CLIENT.ListRepositories()
+		manifests, err := ARTIFACTORY_CLIENT.GetDockerManifests(ARTIFACTORY_REPOSITORY)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		for _, r := range repos {
-			if strings.Compare(r.Type, "LOCAL") == 0 && strings.Compare(r.PackageType, "Docker") == 0 {
-				log.Printf("[Artifactory] Docker repository: %s", r.Key)
+		log.Printf("[Artifactory] Total of manifests found: %d", len(manifests.Results))
 
-				manifests, err := ARTIFACTORY_CLIENT.GetDockerManifests(r.URL)
-				if err != nil {
+		for _, manifest := range manifests.Results {
+			log.Printf("[Artifactory] Found docker manifest: %s", manifest.URI)
+
+			pattern := "/artifactory/api/storage/" + ARTIFACTORY_REPOSITORY + "/(.+?)/manifest.json"
+			r := regexp.MustCompile(pattern)
+			matches := r.FindAllStringSubmatch(manifest.URI, -1)
+
+			for _, m := range matches {
+				path := strings.ToLower(m[1])
+				if err := ARTIFACTORY_CLIENT.GetArtifactoryDockerV2(ARTIFACTORY_REPOSITORY, path); err != nil {
 					log.Error(err)
-					continue
-				}
-
-				for _, manifest := range manifests.Manifests {
-					path := strings.Replace(manifest, "/manifest.json", "", 1)
-					if err := ARTIFACTORY_CLIENT.GetArtifactoryDockerV2(r.Key, path); err != nil {
-						log.Error(err)
-					}
 				}
 			}
 		}
@@ -436,6 +440,7 @@ func init() {
 
 	artifactoryListFiles.PersistentFlags().StringVarP(&ARTIFACTORY_REPOSITORY, "repository", "r", "", "Repository Name")
 	artifactoryDownloadFiles.PersistentFlags().StringVarP(&ARTIFACTORY_REPOSITORY, "repository", "r", "", "Repository Name")
+	artifactoryDockerInfo.PersistentFlags().StringVarP(&ARTIFACTORY_REPOSITORY, "repository", "r", "", "Repository Name")
 
 	var err error
 

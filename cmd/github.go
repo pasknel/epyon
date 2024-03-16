@@ -385,7 +385,7 @@ func (g *GithubClient) DownloadWorker(repos chan *github.Repository, wg *sync.Wa
 		outdir := fmt.Sprintf("%s/%d/", GITHUB_PROJECTS, r.GetID())
 		os.MkdirAll(outdir, os.ModePerm)
 
-		if err := DefaultGitCloneWithToken(r.GetCloneURL(), GITHUB_TOKEN, outdir); err != nil {
+		if err := DefaultGitCloneWithToken(r.GetCloneURL(), GITHUB_TOKEN, outdir, "github"); err != nil {
 			log.Error(err)
 			continue
 		}

@@ -2,6 +2,7 @@ gitlab:
   projects: "./gitlab/projects"
   outputs: "./gitlab/outputs"
   variables: "./gitlab/variables"
+  groups: "./gitlab/groups"
   workers: 10
 
 github:
@@ -45,3 +46,6 @@ artifactory:
   repositories: "./artifactory/repositories"
   docker: "./artifactory/docker"
   workers: 10
+
+terraform:
+  organizations: "./terraform/organizations"

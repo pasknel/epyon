@@ -42,3 +42,5 @@ gitleaks-report.json
 
 # Horusec report file
 horusec-report.json
+
+.DS_Store

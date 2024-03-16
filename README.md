@@ -13,6 +13,7 @@ Available modules:
 7. Sonarqube
 8. Gitea
 9. Artifactory
+10. Terraform Cloud/Enterprise
 
 # Examples
 

