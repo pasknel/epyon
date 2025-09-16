@@ -23,6 +23,7 @@ var (
 	JENKINS_TOKEN     string
 	JENKINS_ARTIFACTS string
 	JENKINS_OUTPUTS   string
+	JENKINS_CONFIGS   string
 	J                 JenkinsClient
 )
 
@@ -285,6 +286,33 @@ func (j *JenkinsClient) GetOutputs() error {
 	return nil
 }
 
+func (j *JenkinsClient) GetConfigs() error {
+	root_jobs, err := j.jenkins.GetAllJobs(j.ctx)
+	if err != nil {
+		return fmt.Errorf("error listing jobs - err: %v", err)
+	}
+
+	for _, job := range root_jobs {
+		config_xml, err := job.GetConfig(j.ctx)
+		if err != nil {
+			log.Errorf("error getting job config - err: %v", err)
+		}
+
+		outputDir := fmt.Sprintf("%s/%s", JENKINS_CONFIGS, job.GetName())
+		path := fmt.Sprintf("%s/config.xml", outputDir)
+		os.MkdirAll(outputDir, os.ModePerm)
+
+		if err = os.WriteFile(path, []byte(config_xml), 0644); err != nil {
+			log.Errorf("error saving job config - err: %v", err)
+			continue
+		}
+
+		log.Printf("[Jenkins] Job: %s - File saved: %s", job.GetName(), path)
+	}
+
+	return nil
+}
+
 var jenkinsListJobsCmd = &cobra.Command{
 	Use:    "list-jobs",
 	Short:  "List Jenkins jobs",
@@ -341,6 +369,19 @@ var jenkinsGetOutputsCmd = &cobra.Command{
 	},
 }
 
+var jenkinsGetConfigsCmd = &cobra.Command{
+	Use:    "get-configs",
+	Short:  "Get jobs configs",
+	Long:   `Get jobs configs`,
+	PreRun: NewJenkinsClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := J.GetConfigs(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 var jenkinsCmd = &cobra.Command{
 	Use:   "jenkins",
 	Short: "Interact with Jenkins Server",
@@ -361,6 +402,7 @@ func init() {
 	jenkinsCmd.AddCommand(jenkinsListUsersCmd)
 	jenkinsCmd.AddCommand(jenkinsDownloadArtifactsCmd)
 	jenkinsCmd.AddCommand(jenkinsGetOutputsCmd)
+	jenkinsCmd.AddCommand(jenkinsGetConfigsCmd)
 
 	jenkinsCmd.PersistentFlags().StringVarP(&JENKINS_SERVER, "server", "s", "", "Server Address")
 	jenkinsCmd.PersistentFlags().StringVarP(&JENKINS_USERNAME, "user", "u", "", "Username")
@@ -375,6 +417,11 @@ func init() {
 	}
 
 	JENKINS_OUTPUTS, err = GetConfigParam("jenkins.outputs")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	JENKINS_CONFIGS, err = GetConfigParam("jenkins.configs")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -23,6 +23,7 @@ registry:
 jenkins:
   outputs: "./jenkins/outputs"
   artifacts: "./jenkins/artifacts"
+  configs: "./jenkins/configs"
 
 nexus:
   repositories: "./nexus/repositories"
@@ -49,3 +50,7 @@ artifactory:
 
 terraform:
   organizations: "./terraform/organizations"
+
+harbor:
+  projects: "./harbor/projects"
+  images: "./harbor/images"

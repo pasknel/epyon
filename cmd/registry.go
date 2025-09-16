@@ -19,6 +19,7 @@ var (
 	REGISTRY_SERVER      string
 	REGISTRY_USER        string
 	REGISTRY_PASS        string
+	REGISTRY_TOKEN       string
 	IMAGE_NAME           string
 	IMAGE_LATEST         bool
 	REGISTRY_WORKERS     int
@@ -85,6 +86,8 @@ func GetFsLayers(image string, tag string) ([]string, error) {
 
 	if len(REGISTRY_USER) > 0 {
 		req.SetBasicAuth(REGISTRY_USER, REGISTRY_PASS)
+	} else if len(REGISTRY_TOKEN) > 0 {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", REGISTRY_TOKEN))
 	}
 
 	client, err := NewHttpClient()
@@ -159,6 +162,8 @@ func GetImageTags(image string) ([]string, error) {
 
 	if len(REGISTRY_USER) > 0 {
 		req.SetBasicAuth(REGISTRY_USER, REGISTRY_PASS)
+	} else if len(REGISTRY_TOKEN) > 0 {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", REGISTRY_TOKEN))
 	}
 
 	client, err := NewHttpClient()
@@ -194,6 +199,8 @@ func DownloadBlob(image string, digest string, tag string) error {
 
 	if len(REGISTRY_USER) > 0 {
 		req.SetBasicAuth(REGISTRY_USER, REGISTRY_PASS)
+	} else if len(REGISTRY_TOKEN) > 0 {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", REGISTRY_TOKEN))
 	}
 
 	client, err := NewHttpClient()

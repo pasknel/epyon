@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/google/go-github/v56/github"
@@ -778,6 +780,199 @@ func (g *GithubClient) ListRepoSecrets() error {
 	return nil
 }
 
+func (g *GithubClient) ListOrgReposSecrets(org string) error {
+	opt := &github.RepositoryListByOrgOptions{
+		Type:        "all",
+		ListOptions: github.ListOptions{PerPage: GITHUB_PAGE_SIZE},
+	}
+
+	for {
+		repos, rsp, err := g.Client.Repositories.ListByOrg(g.Ctx, org, opt)
+		if err != nil {
+			return fmt.Errorf("error listing org repositories - err: %v", err)
+		}
+
+		for _, r := range repos {
+			header := table.Row{"ORG", "REPOSITORY NAME", "SECRET NAME", "VISIBILITY"}
+			results := []table.Row{}
+
+			opt := &github.ListOptions{
+				PerPage: 10,
+			}
+
+			secrets, _, err := g.Client.Actions.ListRepoSecrets(GC.Ctx, GITHUB_ORG, *r.Name, opt)
+			if err != nil {
+				log.Errorf("error listing repo secrets - org: %s - repo: %s", GITHUB_ORG, *r.Name)
+				continue
+			}
+
+			log.Printf("Listing repository secrets - org: %s - repo: %s", GITHUB_ORG, *r.Name)
+			for _, s := range secrets.Secrets {
+				if VERBOSE {
+					log.WithFields(log.Fields{
+						"org":         org,
+						"repo_name":   r.GetName(),
+						"secret_name": s.Name,
+						"visibility":  s.Visibility,
+					}).Info("repository secrets")
+				}
+
+				results = append(results, table.Row{
+					org,
+					r.GetName(),
+					s.Name,
+					s.Visibility,
+				})
+			}
+
+			CreateTable(header, results)
+			fmt.Println()
+		}
+
+		if rsp.NextPage == 0 {
+			break
+		}
+		opt.Page = rsp.NextPage
+	}
+
+	return nil
+}
+
+func (g *GithubClient) ListOrgReposVars(org string) error {
+	opt := &github.RepositoryListByOrgOptions{
+		Type:        "all",
+		ListOptions: github.ListOptions{PerPage: GITHUB_PAGE_SIZE},
+	}
+
+	for {
+		repos, rsp, err := g.Client.Repositories.ListByOrg(g.Ctx, org, opt)
+		if err != nil {
+			return fmt.Errorf("error listing org repositories - err: %v", err)
+		}
+
+		for _, r := range repos {
+			header := table.Row{"ORG", "REPOSITORY NAME", "VARIABLE NAME", "VALUE"}
+			results := []table.Row{}
+
+			opt := &github.ListOptions{
+				PerPage: 10,
+			}
+
+			vars, _, err := g.Client.Actions.ListRepoVariables(GC.Ctx, GITHUB_ORG, *r.Name, opt)
+			if err != nil {
+				log.Errorf("error listing repo secrets - org: %s - repo: %s", GITHUB_ORG, *r.Name)
+				continue
+			}
+
+			log.Printf("Listing repository variables - org: %s - repo: %s", GITHUB_ORG, *r.Name)
+			for _, v := range vars.Variables {
+				if VERBOSE {
+					log.WithFields(log.Fields{
+						"org":       org,
+						"repo_name": r.GetName(),
+						"var_name":  v.Name,
+						"value":     v.Visibility,
+					}).Info("repository variables")
+				}
+
+				results = append(results, table.Row{
+					org,
+					r.GetName(),
+					v.Name,
+					v.Value,
+				})
+			}
+
+			CreateTable(header, results)
+			fmt.Println()
+		}
+
+		if rsp.NextPage == 0 {
+			break
+		}
+		opt.Page = rsp.NextPage
+	}
+
+	return nil
+}
+
+func (g *GithubClient) ListOrgRunners(org string) error {
+	log.Println("[Github] Listing Organization Runners")
+
+	opts := github.ListOptions{PerPage: GITHUB_PAGE_SIZE}
+
+	runners, _, err := g.Client.Actions.ListOrganizationRunners(GC.Ctx, GITHUB_ORG, &opts)
+	if err != nil {
+		return fmt.Errorf("error listing organization runners - err: %v", err)
+	}
+
+	header := table.Row{"ID", "NAME", "OS", "STATUS", "LABELS"}
+	results := []table.Row{}
+
+	for _, r := range runners.Runners {
+		var labels []string
+		for _, label := range r.Labels {
+			labels = append(labels, *label.Name)
+		}
+
+		if VERBOSE {
+			log.WithFields(log.Fields{
+				"org":           org,
+				"runner_id":     *r.ID,
+				"runner_name":   *r.Name,
+				"runner_os":     *r.OS,
+				"runner_status": *r.Status,
+			}).Info("organization runner")
+		}
+
+		results = append(results, table.Row{
+			*r.ID,
+			*r.Name,
+			*r.OS,
+			*r.Status,
+			strings.Join(labels, ","),
+		})
+	}
+
+	CreateTable(header, results)
+	fmt.Println()
+
+	return nil
+}
+
+func (g *GithubClient) AddMemberToOrg(org string) error {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Printf("Enter email to send invite: ")
+	email, _ := reader.ReadString('\n')
+	email = strings.TrimSuffix(email, "\n")
+
+	fmt.Printf("Enter role (admin or member): ")
+	role, _ := reader.ReadString('\n')
+	role = strings.TrimSuffix(role, "\n")
+
+	switch role {
+	case "admin", "member":
+		log.Println("[Github] Creating Org Invitation")
+	default:
+		return fmt.Errorf("unknown role type")
+	}
+
+	opts := &github.CreateOrgInvitationOptions{
+		Email: &email,
+		Role:  &role,
+	}
+
+	invite, _, err := g.Client.Organizations.CreateOrgInvitation(GC.Ctx, org, opts)
+	if err != nil {
+		return fmt.Errorf("error sending org invitation - err: %v", err)
+	}
+
+	log.Printf("[Github] Org Invitation created at: %s", invite.CreatedAt.String())
+
+	return nil
+}
+
 var githubListOrgSecrets = &cobra.Command{
 	Use:    "list-org-secrets",
 	Short:  "List Organization Secrets (requires admin privs)",
@@ -988,6 +1183,62 @@ var githubDownloadOrgProjects = &cobra.Command{
 	},
 }
 
+var githubListOrgReposSecrets = &cobra.Command{
+	Use:    "list-org-repos-secrets",
+	Short:  "List Organization Repository Secrets",
+	Long:   `List Organization Repository Secrets`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.ListOrgReposSecrets(GITHUB_ORG)
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var githubListOrgReposVars = &cobra.Command{
+	Use:    "list-org-repos-vars",
+	Short:  "List Organization Repository Variables",
+	Long:   `List Organization Repository Variables`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.ListOrgReposVars(GITHUB_ORG)
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var githubListOrgRunners = &cobra.Command{
+	Use:    "list-org-runners",
+	Short:  "List Organization Runners",
+	Long:   `List Organization Runners`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.ListOrgRunners(GITHUB_ORG)
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var githubAddMemberToOrg = &cobra.Command{
+	Use:    "org-add-member",
+	Short:  "Add member to organization (requires admin privs)",
+	Long:   `Add member to organization (requires admin privs)`,
+	PreRun: NewGithubClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		err := GC.AddMemberToOrg(GITHUB_ORG)
+		if err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 var githubCmd = &cobra.Command{
 	Use:   "github",
 	Short: "Interact with Github (Enterprise and Actions)",
@@ -1018,6 +1269,10 @@ func init() {
 	githubCmd.AddCommand(githubListRepoSecrets)
 	githubCmd.AddCommand(githubListOrgSecrets)
 	githubCmd.AddCommand(githubListOrgVars)
+	githubCmd.AddCommand(githubListOrgReposSecrets)
+	githubCmd.AddCommand(githubListOrgReposVars)
+	githubCmd.AddCommand(githubListOrgRunners)
+	githubCmd.AddCommand(githubAddMemberToOrg)
 
 	githubCmd.PersistentFlags().StringVarP(&GITHUB_TOKEN, "token", "t", "", "Access Token")
 	githubListOrgRepos.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
@@ -1027,6 +1282,10 @@ func init() {
 	githubGetRunsLogs.PersistentFlags().BoolVarP(&GITHUB_LATEST_RUN, "latest", "l", false, "Get only latest run from each workflow")
 	githubListOrgSecrets.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
 	githubListOrgVars.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
+	githubListOrgReposSecrets.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
+	githubListOrgReposVars.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
+	githubListOrgRunners.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
+	githubAddMemberToOrg.PersistentFlags().StringVarP(&GITHUB_ORG, "org", "o", "", "Organization Name")
 
 	var err error
 

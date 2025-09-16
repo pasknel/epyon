@@ -14,6 +14,7 @@ Available modules:
 8. Gitea
 9. Artifactory
 10. Terraform Cloud/Enterprise
+11. Harbor
 
 # Build
 
@@ -46,6 +47,7 @@ Available Commands:
   github      Interact with Github (Enterprise and Actions)
   gitlab      Interact with Gitlab Server
   gitleaks    Scan projects folders with Gitleaks
+  harbor      Interact with Harbor Server
   help        Help about any command
   horusec     Static source code analysis with Horusec
   jenkins     Interact with Jenkins Server

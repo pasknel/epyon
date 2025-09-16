@@ -64,6 +64,7 @@ type RegistryConfig struct {
 type JenkinsConfig struct {
 	Artifacts string `mapstructure:"artifacts"`
 	Outputs   string `mapstructure:"outputs"`
+	Configs   string `mapstructure:"configs"`
 }
 
 type NexusConfig struct {
@@ -91,6 +92,11 @@ type TerraformConfig struct {
 	Organizations string `mapstructure:"organizations"`
 }
 
+type HarborConfig struct {
+	Projects string `mapstructure:"projects"`
+	Images   string `mapstructure:"images"`
+}
+
 type EpyonConfig struct {
 	Gitlab      map[string]GitlabConfig      `mapstructure:"gitlab"`
 	Github      map[string]GithubConfig      `mapstructure:"github"`
@@ -102,6 +108,7 @@ type EpyonConfig struct {
 	Gitea       map[string]GiteaConfig       `mapstructure:"gitea"`
 	Artifactory map[string]ArtifactoryConfig `mapstructure:"artifactory"`
 	Terraform   map[string]TerraformConfig   `mapstructure:"terraform"`
+	Harbor      map[string]HarborConfig      `mapstructure:"harbor"`
 }
 
 func CreateTable(header table.Row, results []table.Row) {

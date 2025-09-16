@@ -22,6 +22,9 @@ sonarqube/
 # Registry files
 registry/
 
+# Harbor files
+harbor/
+
 # Test binary, built with `go test -c`
 *.test
 
