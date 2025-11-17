@@ -90,7 +90,9 @@
 * [x] Get output from builds
 * [x] Download artifacts from builds
 * [x] List variables
-* [ ] Password Spray
+* [x] List organization feeds
+* [x] List organization packages
+* [x] Whoami
   
 ## Gitea:
 * [x] Get current user info

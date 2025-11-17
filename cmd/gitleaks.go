@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,31 @@ import (
 var (
 	GITLEAKS_PROJECT string
 )
+
+type GitleaksIssue struct {
+	Project     string
+	Description string
+	File        string
+	Commit      string
+	Secret      string
+}
+
+func SaveGitleakIssues(issue GitleaksIssue) error {
+	out, err := os.OpenFile("gitleaks-issues.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer out.Close()
+
+	data, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("error during json marshal - err: %v", err)
+	}
+
+	out.Write(data)
+
+	return nil
+}
 
 func RunGitleaks(path string) error {
 	log.Printf("[Gitleaks] Scanning project: %s", path)
@@ -34,12 +60,24 @@ func RunGitleaks(path string) error {
 		header := table.Row{"DESCRIPTION", "FILE", "COMMIT", "SECRET"}
 
 		for _, f := range findings {
+			issue := GitleaksIssue{
+				Project:     path,
+				Description: f.Description,
+				File:        f.File,
+				Commit:      f.Commit,
+				Secret:      f.Secret,
+			}
+
 			rows = append(rows, table.Row{
-				f.Description,
-				f.File,
-				f.Commit,
-				f.Secret,
+				issue.Description,
+				issue.File,
+				issue.Commit,
+				issue.Secret,
 			})
+
+			if err := SaveGitleakIssues(issue); err != nil {
+				log.Error(err)
+			}
 		}
 
 		CreateTable(header, rows)

@@ -15,6 +15,7 @@ import (
 	"github.com/microsoft/azure-devops-go-api/azuredevops/core"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/feed"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/git"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/location"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/pipelines"
 	"github.com/spf13/cobra"
 
@@ -38,6 +39,7 @@ type AzureClient struct {
 	p   pipelines.Client
 	f   feed.Client
 	b   build.Client
+	l   location.Client
 	ctx context.Context
 }
 
@@ -163,7 +165,12 @@ func (ac *AzureClient) DownloadRepos() error {
 		go ac.DownloadWorker(&wg, repositories)
 	}
 
-	repos, err := ac.g.GetRepositories(ac.ctx, git.GetRepositoriesArgs{})
+	opt := git.GetRepositoriesArgs{}
+	if len(AZURE_PROJECT_ID) > 0 {
+		opt.Project = &AZURE_PROJECT_ID
+	}
+
+	repos, err := ac.g.GetRepositories(ac.ctx, opt)
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
@@ -501,6 +508,11 @@ func (ac *AzureClient) GetVariableGroups() error {
 		}
 
 		for _, b := range builds.Value {
+			if b.Repository.Name == nil || b.BuildNumber == nil {
+				log.Errorf("error getting build information")
+				continue
+			}
+
 			headers := table.Row{"PROJECT", "BUILD", "VARIABLE GROUP", "VARIABLE", "VALUE"}
 			results := []table.Row{}
 
@@ -519,13 +531,19 @@ func (ac *AzureClient) GetVariableGroups() error {
 			if def.VariableGroups != nil {
 				for _, varGroup := range *def.VariableGroups {
 					for k, v := range *varGroup.Variables {
+						var value string
+						if v.Value != nil {
+							value = *v.Value
+						}
+
 						results = append(results, table.Row{
 							project,
 							*b.BuildNumber,
 							*varGroup.Name,
 							k,
-							*v.Value,
+							value,
 						})
+
 					}
 
 					projVarsBytes, err := json.Marshal(*varGroup.Variables)
@@ -547,6 +565,88 @@ func (ac *AzureClient) GetVariableGroups() error {
 				fmt.Println()
 			}
 		}
+	}
+
+	return nil
+}
+
+func (ac *AzureClient) Whoami() error {
+	log.Println("[Azure DevOps] Getting user information")
+
+	cdata, err := ac.l.GetConnectionData(ac.ctx, location.GetConnectionDataArgs{})
+	if err != nil {
+		return err
+	}
+
+	headers := table.Row{"ID", "DISPLAY NAME", "DESCRIPTOR"}
+	results := []table.Row{}
+
+	results = append(results, table.Row{
+		*cdata.AuthenticatedUser.Id,
+		*cdata.AuthenticatedUser.ProviderDisplayName,
+		*cdata.AuthenticatedUser.Descriptor,
+	})
+
+	CreateTable(headers, results)
+
+	return nil
+}
+
+func (ac *AzureClient) ListOrgFeeds() error {
+	log.Println("[Azure DevOps] Listing organization feeds")
+
+	feeds, err := ac.f.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
+	if err != nil {
+		return err
+	}
+
+	headers := table.Row{"ID", "DISPLAY NAME"}
+	results := []table.Row{}
+
+	for _, feed := range *feeds {
+		results = append(results, table.Row{
+			*feed.Id,
+			*feed.Name,
+		})
+	}
+
+	CreateTable(headers, results)
+
+	return nil
+}
+
+func (ac *AzureClient) ListFeedsPackages() error {
+	feeds, err := ac.f.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
+	if err != nil {
+		return err
+	}
+
+	for _, f := range *feeds {
+		log.Printf("[Azure DevOps] Listing packages - feed: %s", *f.Name)
+
+		packages, err := ac.f.GetPackages(ac.ctx, feed.GetPackagesArgs{FeedId: f.FullyQualifiedId})
+		if err != nil {
+			log.Errorf("%v\n\n", err)
+			continue
+		}
+
+		headers := table.Row{"ID", "NAME", "TYPE", "VERSION"}
+		results := []table.Row{}
+
+		for _, p := range *packages {
+			for _, v := range *p.Versions {
+				results = append(results, table.Row{
+					*p.Id,
+					*p.Name,
+					*p.ProtocolType,
+					*v.Version,
+				})
+			}
+		}
+
+		CreateTable(headers, results)
+
+		fmt.Println()
 	}
 
 	return nil
@@ -581,12 +681,15 @@ func NewAzureClient(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
+	lclient := location.NewClient(ctx, conn)
+
 	az.ctx = ctx
 	az.c = client
 	az.g = gclient
 	az.p = pclient
 	az.f = fclient
 	az.b = bclient
+	az.l = lclient
 
 	AZ = az
 }
@@ -611,8 +714,7 @@ var azureListProjectsCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.ListProjects()
-		if err != nil {
+		if err := AZ.ListProjects(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -625,8 +727,7 @@ var azureListReposCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.ListRepositories()
-		if err != nil {
+		if err := AZ.ListRepositories(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -639,8 +740,7 @@ var azureListPipelinesCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.ListPipelines()
-		if err != nil {
+		if err := AZ.ListPipelines(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -653,8 +753,7 @@ var azureListBuildsCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.ListBuilds()
-		if err != nil {
+		if err := AZ.ListBuilds(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -667,8 +766,7 @@ var azureGetBuildsCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.GetBuildsOutputs()
-		if err != nil {
+		if err := AZ.GetBuildsOutputs(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -681,8 +779,7 @@ var azureDownloadArtifactsCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.DownloadBuildsArtifacts()
-		if err != nil {
+		if err := AZ.DownloadBuildsArtifacts(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -695,8 +792,7 @@ var azureDownloadReposCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.DownloadRepos()
-		if err != nil {
+		if err := AZ.DownloadRepos(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -709,8 +805,46 @@ var azureListVarGroupsCmd = &cobra.Command{
 	PreRun: NewAzureClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := AZ.GetVariableGroups()
-		if err != nil {
+		if err := AZ.GetVariableGroups(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var azureWhoamiCmd = &cobra.Command{
+	Use:    "whoami",
+	Short:  "Whoami",
+	Long:   `Whoami`,
+	PreRun: NewAzureClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := AZ.Whoami(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var azureListOrgFeedsCmd = &cobra.Command{
+	Use:    "list-org-feeds",
+	Short:  "List organization feeds",
+	Long:   `List organization feeds`,
+	PreRun: NewAzureClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := AZ.ListOrgFeeds(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+var azureListOrgPackagesCmd = &cobra.Command{
+	Use:    "list-org-packages",
+	Short:  "List organization packages",
+	Long:   `List organization packages`,
+	PreRun: NewAzureClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := AZ.ListFeedsPackages(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -727,12 +861,16 @@ func init() {
 	azureCmd.AddCommand(azureGetBuildsCmd)
 	azureCmd.AddCommand(azureDownloadArtifactsCmd)
 	azureCmd.AddCommand(azureListVarGroupsCmd)
+	azureCmd.AddCommand(azureWhoamiCmd)
+	azureCmd.AddCommand(azureListOrgFeedsCmd)
+	azureCmd.AddCommand(azureListOrgPackagesCmd)
 
 	azureCmd.PersistentFlags().StringVarP(&AZURE_ORG_URL, "org", "o", "", "Organization URL (Ex: https://dev.azure.com/myorg)")
 	azureCmd.PersistentFlags().StringVarP(&AZURE_TOKEN, "token", "t", "", "Access Token")
 	azureListReposCmd.Flags().StringVarP(&AZURE_PROJECT_ID, "project", "p", "", "Project ID or name")
 	azureListPipelinesCmd.Flags().StringVarP(&AZURE_PROJECT_ID, "project", "p", "", "Project ID or name")
 	azureListVarGroupsCmd.Flags().StringVarP(&AZURE_PROJECT_ID, "project", "p", "", "Project ID or name")
+	azureDownloadReposCmd.Flags().StringVarP(&AZURE_PROJECT_ID, "project", "p", "", "Project ID or name")
 
 	var err error
 

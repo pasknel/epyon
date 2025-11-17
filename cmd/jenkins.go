@@ -320,8 +320,7 @@ var jenkinsListJobsCmd = &cobra.Command{
 	PreRun: NewJenkinsClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := J.ListJobs()
-		if err != nil {
+		if err := J.ListJobs(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -334,8 +333,7 @@ var jenkinsListUsersCmd = &cobra.Command{
 	PreRun: NewJenkinsClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := J.ListUsers()
-		if err != nil {
+		if err := J.ListUsers(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -348,8 +346,7 @@ var jenkinsDownloadArtifactsCmd = &cobra.Command{
 	PreRun: NewJenkinsClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := J.DownloadArtifacts()
-		if err != nil {
+		if err := J.DownloadArtifacts(); err != nil {
 			log.Fatal(err)
 		}
 	},
@@ -362,8 +359,7 @@ var jenkinsGetOutputsCmd = &cobra.Command{
 	PreRun: NewJenkinsClient,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		err := J.GetOutputs()
-		if err != nil {
+		if err := J.GetOutputs(); err != nil {
 			log.Fatal(err)
 		}
 	},
