@@ -16,6 +16,7 @@ import (
 
 var (
 	GITLEAKS_PROJECT string
+	GITLEAKS_OUTPUT  string
 )
 
 type GitleaksIssue struct {
@@ -27,7 +28,7 @@ type GitleaksIssue struct {
 }
 
 func SaveGitleakIssues(issue GitleaksIssue) error {
-	out, err := os.OpenFile("gitleaks-issues.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	out, err := os.OpenFile(GITLEAKS_OUTPUT, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -148,4 +149,5 @@ func init() {
 	rootCmd.AddCommand(gitleaksCmd)
 
 	gitleaksCmd.Flags().StringVarP(&GITLEAKS_PROJECT, "projects", "p", "./gitlab/projects", "Path to Downloaded Projects")
+	gitleaksCmd.Flags().StringVarP(&GITLEAKS_OUTPUT, "output", "o", "gitleaks-issues.json", "Output File")
 }

@@ -32,7 +32,12 @@ type Repo struct {
 	Repositories []string `json:"repositories"`
 }
 
-type Manifest struct {
+type Tags struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+}
+
+type DockerManifest struct {
 	Version int                 `json:"schemaVersion"`
 	Name    string              `json:"name"`
 	Tag     string              `json:"tag"`
@@ -45,33 +50,43 @@ type DockerfileHistory struct {
 	Command string `json:"v1Compatibility"`
 }
 
-type RegistryContainerConfig struct {
+type DockerImageConfig struct {
 	Commands []string `json:"Cmd"`
 }
 
-type RegistryCommand struct {
-	Id        string                  `json:"id"`
-	Created   string                  `json:"created"`
-	Parent    string                  `json:"parent"`
-	Throwaway bool                    `json:"throwaway"`
-	Config    RegistryContainerConfig `json:"container_config"`
+type DockerCommand struct {
+	Id        string            `json:"id"`
+	Created   string            `json:"created"`
+	Parent    string            `json:"parent"`
+	Throwaway bool              `json:"throwaway"`
+	Config    DockerImageConfig `json:"container_config"`
 }
 
-type NexusContainerConfig struct {
-	ContainerConfig string `json:"container_config"`
+type NexusManifest struct {
+	MediaType     string            `json:"mediaType"`
+	SchemaVersion int               `json:"schemaVersion"`
+	Config        NexusImageLayer   `json:"config"`
+	Layers        []NexusImageLayer `json:"layers"`
 }
 
-type NexusCommand struct {
-	Id        string               `json:"id"`
-	Created   string               `json:"created"`
-	Parent    string               `json:"parent"`
-	Throwaway bool                 `json:"throwaway"`
-	Cmd       NexusContainerConfig `json:"Cmd"`
+type NexusImageLayer struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int    `json:"size"`
 }
 
-type Tags struct {
-	Name string   `json:"name"`
-	Tags []string `json:"tags"`
+type NexusImageConfig struct {
+	Created      string              `json:"created"`
+	Architecture string              `json:"architecture"`
+	OS           string              `json:"os"`
+	History      []NexusImageCommand `json:"history"`
+}
+
+type NexusImageCommand struct {
+	Created    string `json:"created"`
+	CreatedBy  string `json:"created_by"`
+	Comment    string `json:"comment"`
+	EmptyLayer bool   `json:"empty_layer"`
 }
 
 func GetFsLayers(image string, tag string) ([]string, error) {
@@ -101,14 +116,31 @@ func GetFsLayers(image string, tag string) ([]string, error) {
 	}
 	defer rsp.Body.Close()
 
-	var manifest Manifest
-	err = json.NewDecoder(rsp.Body).Decode(&manifest)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return digests, fmt.Errorf("error in JSON decoding - err: %v", err)
+		return digests, fmt.Errorf("error reading response - err: %v", err)
 	}
 
-	for _, layer := range manifest.Layers {
-		digests = append(digests, layer["blobSum"])
+	if strings.Compare(REGISTRY_SERVER_TYPE, "Docker") == 0 {
+		var manifest DockerManifest
+
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return digests, fmt.Errorf("error in JSON decoding - err: %v", err)
+		}
+
+		for _, layer := range manifest.Layers {
+			digests = append(digests, layer["blobSum"])
+		}
+	} else {
+		var manifest NexusManifest
+
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return digests, fmt.Errorf("error in JSON decoding - err: %v", err)
+		}
+
+		for _, layer := range manifest.Layers {
+			digests = append(digests, layer.Digest)
+		}
 	}
 
 	return digests, nil
@@ -139,10 +171,14 @@ func GetImageList() ([]string, error) {
 	}
 	defer rsp.Body.Close()
 
-	var repos Repo
-	err = json.NewDecoder(rsp.Body).Decode(&repos)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return images, fmt.Errorf("error in JSON decoding - err: %v", err)
+		return images, fmt.Errorf("error reading response - err: %v", err)
+	}
+
+	var repos Repo
+	if err := json.Unmarshal(data, &repos); err != nil {
+		return images, fmt.Errorf("error in json unmarshal - err: %v", err)
 	}
 
 	images = append(images, repos.Repositories...)
@@ -177,11 +213,14 @@ func GetImageTags(image string) ([]string, error) {
 	}
 	defer rsp.Body.Close()
 
-	t := Tags{}
-
-	err = json.NewDecoder(rsp.Body).Decode(&t)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return tags, fmt.Errorf("error in JSON decoding - err: %v", err)
+		return tags, fmt.Errorf("error reading response - err: %v", err)
+	}
+
+	var t Tags
+	if err := json.Unmarshal(data, &t); err != nil {
+		return tags, fmt.Errorf("error in json unmarshal - err: %v", err)
 	}
 
 	tags = append(tags, t.Tags...)
@@ -267,8 +306,7 @@ func DownloadWorker(images chan string, wg *sync.WaitGroup) {
 			}
 
 			for _, digest := range layers {
-				err = DownloadBlob(img, digest, tag)
-				if err != nil {
+				if err := DownloadBlob(img, digest, tag); err != nil {
 					log.Error(err)
 				}
 			}
@@ -301,33 +339,30 @@ func GetCommandHistory(image string, tag string) ([]string, error) {
 	}
 	defer rsp.Body.Close()
 
-	var manifest Manifest
-	err = json.NewDecoder(rsp.Body).Decode(&manifest)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
-		return commands, fmt.Errorf("error in JSON decoding - err: %v", err)
+		return commands, fmt.Errorf("error reading response - err: %v", err)
 	}
 
-	if len(REGISTRY_SERVER_TYPE) == 0 {
-		serverBanner := rsp.Header.Get("Server")
-		if strings.Contains(serverBanner, "Nexus") {
-			REGISTRY_SERVER_TYPE = "Nexus"
-		} else {
-			REGISTRY_SERVER_TYPE = "Docker Registry"
+	if strings.Compare(REGISTRY_SERVER_TYPE, "Docker") == 0 {
+		var manifest DockerManifest
+
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return commands, fmt.Errorf("error in JSON decoding - err: %v", err)
 		}
-	}
 
-	for _, h := range manifest.History {
-		if strings.Compare(REGISTRY_SERVER_TYPE, "Docker Registry") == 0 {
-			rc := RegistryCommand{}
+		for _, h := range manifest.History {
+			dc := DockerCommand{}
 
-			err := json.Unmarshal([]byte(h.Command), &rc)
+			err := json.Unmarshal([]byte(h.Command), &dc)
 			if err != nil {
-				log.Errorf(fmt.Sprintf("error in JSON Unmarshal - err: %v", err))
+				log.Errorf("error in JSON Unmarshal - err: %v", err)
 				continue
 			}
 
-			for _, cmd := range rc.Config.Commands {
+			for _, cmd := range dc.Config.Commands {
 				prefix := []string{"/bin/sh -c #(nop)", "/bin/sh -c"}
+
 				for _, p := range prefix {
 					if strings.HasPrefix(cmd, p) {
 						cmd = strings.TrimPrefix(cmd, p)
@@ -348,18 +383,51 @@ func GetCommandHistory(image string, tag string) ([]string, error) {
 
 				commands = append(commands, cmd)
 			}
-		} else {
-			nc := NexusCommand{}
+		}
+	} else {
+		var manifest NexusManifest
 
-			err := json.Unmarshal([]byte(h.Command), &nc)
-			if err != nil {
-				log.Errorf(fmt.Sprintf("error in JSON Unmarshal - err: %v", err))
-				continue
-			}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return commands, fmt.Errorf("error in JSON decoding - err: %v", err)
+		}
 
-			cmd := nc.Cmd.ContainerConfig
+		url := fmt.Sprintf("%s/v2/%s/blobs/%s", strings.TrimSuffix(REGISTRY_SERVER, "/"), image, manifest.Config.Digest)
+
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return commands, fmt.Errorf("error in new request - err: %v", err)
+		}
+
+		if len(REGISTRY_USER) > 0 {
+			req.SetBasicAuth(REGISTRY_USER, REGISTRY_PASS)
+		}
+
+		client, err := NewHttpClient()
+		if err != nil {
+			return commands, err
+		}
+
+		rsp, err := client.Do(req)
+		if err != nil {
+			return commands, fmt.Errorf("error sending request - err: %v", err)
+		}
+		defer rsp.Body.Close()
+
+		data, err := io.ReadAll(rsp.Body)
+		if err != nil {
+			return commands, fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var config NexusImageConfig
+		if err := json.Unmarshal(data, &config); err != nil {
+			return commands, fmt.Errorf("error during json unmarshal - err: %v", err)
+		}
+
+		for _, h := range config.History {
+			cmd := h.CreatedBy
 
 			prefix := []string{"/bin/sh -c #(nop)", "/bin/sh -c"}
+
 			for _, p := range prefix {
 				if strings.HasPrefix(cmd, p) {
 					cmd = strings.TrimPrefix(cmd, p)
@@ -529,10 +597,11 @@ var registryHistoryCmd = &cobra.Command{
 				outdir := fmt.Sprintf("%s/%s/%s", REGISTRY_COMMANDS, img, tag)
 				os.MkdirAll(outdir, os.ModePerm)
 
-				outfile, err := os.OpenFile(
-					fmt.Sprintf("%s/Dockerfile", outdir),
-					os.O_APPEND|os.O_CREATE|os.O_WRONLY,
-					0644)
+				outfile, err := os.OpenFile(fmt.Sprintf("%s/Dockerfile", outdir), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					log.Error(err)
+					continue
+				}
 				defer outfile.Close()
 
 				datawriter := bufio.NewWriter(outfile)
@@ -545,6 +614,7 @@ var registryHistoryCmd = &cobra.Command{
 		}
 	},
 }
+
 var registryCmd = &cobra.Command{
 	Use:   "registry",
 	Short: "Interact with Docker Registry",
@@ -570,6 +640,7 @@ func init() {
 	registryCmd.PersistentFlags().StringVarP(&REGISTRY_USER, "user", "u", "", "Username")
 	registryCmd.PersistentFlags().StringVarP(&REGISTRY_PASS, "password", "p", "", "Password")
 	registryCmd.PersistentFlags().StringVarP(&IMAGE_NAME, "image", "i", "", "Image Name")
+	registryCmd.PersistentFlags().StringVarP(&REGISTRY_SERVER_TYPE, "type", "t", "Docker", "Server Type (Docker or Nexus)")
 
 	registryDownloadImagesCmd.PersistentFlags().BoolVarP(&IMAGE_LATEST, "latest", "l", false, "Download only latest version")
 
