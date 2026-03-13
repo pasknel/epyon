@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"sync"
 
@@ -15,8 +15,10 @@ import (
 	"github.com/microsoft/azure-devops-go-api/azuredevops/core"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/feed"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/git"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/graph"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/location"
 	"github.com/microsoft/azure-devops-go-api/azuredevops/pipelines"
+	"github.com/microsoft/azure-devops-go-api/azuredevops/taskagent"
 	"github.com/spf13/cobra"
 
 	log "github.com/sirupsen/logrus"
@@ -34,19 +36,21 @@ var (
 )
 
 type AzureClient struct {
-	c   core.Client
-	g   git.Client
-	p   pipelines.Client
-	f   feed.Client
-	b   build.Client
-	l   location.Client
-	ctx context.Context
+	core      core.Client
+	git       git.Client
+	pipelines pipelines.Client
+	feed      feed.Client
+	build     build.Client
+	location  location.Client
+	graph     graph.Client
+	ctx       context.Context
+	taskagent taskagent.Client
 }
 
 func (ac *AzureClient) GetProjectList() ([]string, error) {
 	var projects []string
 
-	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 	if err != nil {
 		return projects, fmt.Errorf("error listing projects - err: %v", err)
 	}
@@ -61,7 +65,7 @@ func (ac *AzureClient) GetProjectList() ([]string, error) {
 				ContinuationToken: &resp.ContinuationToken,
 			}
 
-			resp, err = ac.c.GetProjects(ac.ctx, args)
+			resp, err = ac.core.GetProjects(ac.ctx, args)
 			if err != nil {
 				return projects, fmt.Errorf("error listing projects - err: %v", err)
 			}
@@ -80,7 +84,7 @@ func (ac *AzureClient) GetRepositoryList(project string) ([]string, error) {
 		Project: &project,
 	}
 
-	repos, err := ac.g.GetRepositories(ac.ctx, opt)
+	repos, err := ac.git.GetRepositories(ac.ctx, opt)
 	if err != nil {
 		return repositories, fmt.Errorf("error listing repositories - err: %v", err)
 	}
@@ -95,7 +99,7 @@ func (ac *AzureClient) GetRepositoryList(project string) ([]string, error) {
 func (ac *AzureClient) ListProjects() error {
 	log.Info("[Azure DevOps] Listing Projects")
 
-	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
@@ -113,7 +117,7 @@ func (ac *AzureClient) ListProjects() error {
 				ContinuationToken: &resp.ContinuationToken,
 			}
 
-			resp, err = ac.c.GetProjects(ac.ctx, args)
+			resp, err = ac.core.GetProjects(ac.ctx, args)
 			if err != nil {
 				return fmt.Errorf("err: %v", err)
 			}
@@ -170,7 +174,7 @@ func (ac *AzureClient) DownloadRepos() error {
 		opt.Project = &AZURE_PROJECT_ID
 	}
 
-	repos, err := ac.g.GetRepositories(ac.ctx, opt)
+	repos, err := ac.git.GetRepositories(ac.ctx, opt)
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
@@ -208,7 +212,7 @@ func (ac *AzureClient) ListRepositories() error {
 			Project: &project,
 		}
 
-		repos, err := ac.g.GetRepositories(ac.ctx, opt)
+		repos, err := ac.git.GetRepositories(ac.ctx, opt)
 		if err != nil {
 			return fmt.Errorf("err: %v", err)
 		}
@@ -230,7 +234,7 @@ func (ac *AzureClient) ListPipelines() error {
 	headers := table.Row{"PROJECT", "PIPELINE NAME"}
 
 	if len(AZURE_PROJECT_ID) > 0 {
-		resp, err := ac.p.ListPipelines(ac.ctx, pipelines.ListPipelinesArgs{
+		resp, err := ac.pipelines.ListPipelines(ac.ctx, pipelines.ListPipelinesArgs{
 			Project: &AZURE_PROJECT_ID,
 		})
 
@@ -242,14 +246,14 @@ func (ac *AzureClient) ListPipelines() error {
 			results = append(results, table.Row{AZURE_PROJECT_ID, *pipeline.Name})
 		}
 	} else {
-		resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+		resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 		if err != nil {
 			return fmt.Errorf("err: %v", err)
 		}
 
 		for resp != nil {
 			for _, project := range (*resp).Value {
-				resp, err := ac.p.ListPipelines(ac.ctx, pipelines.ListPipelinesArgs{
+				resp, err := ac.pipelines.ListPipelines(ac.ctx, pipelines.ListPipelinesArgs{
 					Project: project.Name,
 				})
 				if err != nil {
@@ -266,7 +270,7 @@ func (ac *AzureClient) ListPipelines() error {
 					ContinuationToken: &resp.ContinuationToken,
 				}
 
-				resp, err = ac.c.GetProjects(ac.ctx, args)
+				resp, err = ac.core.GetProjects(ac.ctx, args)
 				if err != nil {
 					return fmt.Errorf("err: %v", err)
 				}
@@ -282,7 +286,7 @@ func (ac *AzureClient) ListPipelines() error {
 }
 
 func (ac *AzureClient) ListBuilds() error {
-	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
@@ -292,7 +296,7 @@ func (ac *AzureClient) ListBuilds() error {
 
 	for resp != nil {
 		for _, project := range (*resp).Value {
-			builds, err := ac.b.GetBuilds(ac.ctx, build.GetBuildsArgs{
+			builds, err := ac.build.GetBuilds(ac.ctx, build.GetBuildsArgs{
 				Project: project.Name,
 			})
 
@@ -312,7 +316,7 @@ func (ac *AzureClient) ListBuilds() error {
 				ContinuationToken: &resp.ContinuationToken,
 			}
 
-			resp, err = ac.c.GetProjects(ac.ctx, args)
+			resp, err = ac.core.GetProjects(ac.ctx, args)
 			if err != nil {
 				return fmt.Errorf("err: %v", err)
 			}
@@ -327,14 +331,14 @@ func (ac *AzureClient) ListBuilds() error {
 }
 
 func (ac *AzureClient) GetBuildsOutputs() error {
-	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
 
 	for resp != nil {
 		for _, project := range (*resp).Value {
-			builds, err := ac.b.GetBuilds(ac.ctx, build.GetBuildsArgs{
+			builds, err := ac.build.GetBuilds(ac.ctx, build.GetBuildsArgs{
 				Project: project.Name,
 			})
 
@@ -346,7 +350,7 @@ func (ac *AzureClient) GetBuildsOutputs() error {
 			for _, b := range builds.Value {
 				log.Printf("Getting logs from project: %s - build: %s", *project.Name, *b.BuildNumber)
 
-				logs, err := ac.b.GetBuildLogs(ac.ctx, build.GetBuildLogsArgs{
+				logs, err := ac.build.GetBuildLogs(ac.ctx, build.GetBuildLogsArgs{
 					Project: project.Name,
 					BuildId: b.Id,
 				})
@@ -360,7 +364,7 @@ func (ac *AzureClient) GetBuildsOutputs() error {
 				os.MkdirAll(logs_dir, os.ModePerm)
 
 				for _, l := range *logs {
-					lines, err := ac.b.GetBuildLogLines(ac.ctx, build.GetBuildLogLinesArgs{
+					lines, err := ac.build.GetBuildLogLines(ac.ctx, build.GetBuildLogLinesArgs{
 						Project: project.Name,
 						BuildId: b.Id,
 						LogId:   l.Id,
@@ -395,7 +399,7 @@ func (ac *AzureClient) GetBuildsOutputs() error {
 				ContinuationToken: &resp.ContinuationToken,
 			}
 
-			resp, err = ac.c.GetProjects(ac.ctx, args)
+			resp, err = ac.core.GetProjects(ac.ctx, args)
 			if err != nil {
 				return fmt.Errorf("err: %v", err)
 			}
@@ -408,14 +412,14 @@ func (ac *AzureClient) GetBuildsOutputs() error {
 }
 
 func (ac *AzureClient) DownloadBuildsArtifacts() error {
-	resp, err := ac.c.GetProjects(ac.ctx, core.GetProjectsArgs{})
+	resp, err := ac.core.GetProjects(ac.ctx, core.GetProjectsArgs{})
 	if err != nil {
 		return fmt.Errorf("err: %v", err)
 	}
 
 	for resp != nil {
 		for _, project := range (*resp).Value {
-			builds, err := ac.b.GetBuilds(ac.ctx, build.GetBuildsArgs{
+			builds, err := ac.build.GetBuilds(ac.ctx, build.GetBuildsArgs{
 				Project: project.Name,
 			})
 
@@ -425,7 +429,7 @@ func (ac *AzureClient) DownloadBuildsArtifacts() error {
 			}
 
 			for _, b := range builds.Value {
-				artifacts, err := ac.b.GetArtifacts(ac.ctx, build.GetArtifactsArgs{
+				artifacts, err := ac.build.GetArtifacts(ac.ctx, build.GetArtifactsArgs{
 					Project: project.Name,
 					BuildId: b.Id,
 				})
@@ -439,7 +443,7 @@ func (ac *AzureClient) DownloadBuildsArtifacts() error {
 				os.MkdirAll(artifacts_dir, os.ModePerm)
 
 				for _, artifact := range *artifacts {
-					content, err := ac.b.GetArtifactContentZip(ac.ctx, build.GetArtifactContentZipArgs{
+					content, err := ac.build.GetArtifactContentZip(ac.ctx, build.GetArtifactContentZipArgs{
 						Project:      project.Name,
 						BuildId:      b.Id,
 						ArtifactName: artifact.Name,
@@ -450,15 +454,15 @@ func (ac *AzureClient) DownloadBuildsArtifacts() error {
 						continue
 					}
 
-					data, err := ioutil.ReadAll(content)
+					data, err := io.ReadAll(content)
 					if err != nil {
 						log.Errorf("error reading artifact - err: %v", err)
 						continue
 					}
 
 					artifact_path := fmt.Sprintf("%s/%s", artifacts_dir, *artifact.Name)
-					err = ioutil.WriteFile(artifact_path, data, 0644)
-					if err != nil {
+
+					if err := os.WriteFile(artifact_path, data, 0644); err != nil {
 						log.Errorf("error saving artifact to local directory - err: %v", err)
 					}
 
@@ -472,7 +476,7 @@ func (ac *AzureClient) DownloadBuildsArtifacts() error {
 				ContinuationToken: &resp.ContinuationToken,
 			}
 
-			resp, err = ac.c.GetProjects(ac.ctx, args)
+			resp, err = ac.core.GetProjects(ac.ctx, args)
 			if err != nil {
 				return fmt.Errorf("err: %v", err)
 			}
@@ -498,72 +502,55 @@ func (ac *AzureClient) GetVariableGroups() error {
 	}
 
 	for _, project := range projects {
-		builds, err := ac.b.GetBuilds(ac.ctx, build.GetBuildsArgs{
+		args := taskagent.GetVariableGroupsArgs{
 			Project: &project,
-		})
+		}
 
+		rsp, err := ac.taskagent.GetVariableGroups(ac.ctx, args)
 		if err != nil {
-			log.Errorf("error getting builds from project: %s - err: %v", project, err)
+			log.Errorf("error getting variables groups - err: %v", err)
 			continue
 		}
 
-		for _, b := range builds.Value {
-			if b.Repository.Name == nil || b.BuildNumber == nil {
-				log.Errorf("error getting build information")
-				continue
-			}
+		for _, vg := range *rsp {
+			log.Printf("[Azure DevOps] Project: %s - Variable Group: %s", project, *vg.Name)
 
-			headers := table.Row{"PROJECT", "BUILD", "VARIABLE GROUP", "VARIABLE", "VALUE"}
+			headers := table.Row{"NAME", "VALUE", "IS SECRET ?"}
 			results := []table.Row{}
 
-			log.Printf("Getting definition from project: %s - repository: %s - build: %s", project, *b.Repository.Name, *b.BuildNumber)
+			for name, value := range *vg.Variables {
+				m, _ := value.(map[string]interface{})
+				v := m["value"]
 
-			def, err := ac.b.GetDefinition(ac.ctx, build.GetDefinitionArgs{
-				Project:      &project,
-				DefinitionId: b.Definition.Id,
-			})
+				_, secret := m["isSecret"]
+				if secret {
+					v = "***"
+				}
 
+				results = append(results, table.Row{
+					name,
+					v,
+					secret,
+				})
+			}
+
+			CreateTable(headers, results)
+
+			varsGroupBytes, err := json.Marshal(vg)
 			if err != nil {
-				log.Errorf("error getting build definition - err: %v", err)
+				log.Errorf("error in json marshal - err: %v", err)
 				continue
 			}
 
-			if def.VariableGroups != nil {
-				for _, varGroup := range *def.VariableGroups {
-					for k, v := range *varGroup.Variables {
-						var value string
-						if v.Value != nil {
-							value = *v.Value
-						}
+			outdir := fmt.Sprintf("%s/%s", AZURE_VARIABLES_DIR, project)
+			os.MkdirAll(outdir, os.ModePerm)
 
-						results = append(results, table.Row{
-							project,
-							*b.BuildNumber,
-							*varGroup.Name,
-							k,
-							value,
-						})
-
-					}
-
-					projVarsBytes, err := json.Marshal(*varGroup.Variables)
-					if err != nil {
-						log.Errorf("error in JSON marshal - err: %v", err)
-						continue
-					}
-
-					outdir := fmt.Sprintf("%s/%s/%s", AZURE_VARIABLES_DIR, project, *b.BuildNumber)
-					os.MkdirAll(outdir, os.ModePerm)
-
-					varsFile := fmt.Sprintf("%s/variable_groups.json", outdir)
-					if err = ioutil.WriteFile(varsFile, projVarsBytes, 0644); err != nil {
-						log.Errorf("error creating JSON file - err: %v", err)
-					}
-				}
-
-				CreateTable(headers, results)
-				fmt.Println()
+			varsFile := fmt.Sprintf("%s/%s.json", outdir, *vg.Name)
+			if err := os.WriteFile(varsFile, varsGroupBytes, 0644); err != nil {
+				log.Errorf("error creating json file - err: %v", err)
 			}
+
+			fmt.Println()
 		}
 	}
 
@@ -573,7 +560,7 @@ func (ac *AzureClient) GetVariableGroups() error {
 func (ac *AzureClient) Whoami() error {
 	log.Println("[Azure DevOps] Getting user information")
 
-	cdata, err := ac.l.GetConnectionData(ac.ctx, location.GetConnectionDataArgs{})
+	cdata, err := ac.location.GetConnectionData(ac.ctx, location.GetConnectionDataArgs{})
 	if err != nil {
 		return err
 	}
@@ -595,7 +582,7 @@ func (ac *AzureClient) Whoami() error {
 func (ac *AzureClient) ListOrgFeeds() error {
 	log.Println("[Azure DevOps] Listing organization feeds")
 
-	feeds, err := ac.f.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
+	feeds, err := ac.feed.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
 	if err != nil {
 		return err
 	}
@@ -616,7 +603,7 @@ func (ac *AzureClient) ListOrgFeeds() error {
 }
 
 func (ac *AzureClient) ListFeedsPackages() error {
-	feeds, err := ac.f.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
+	feeds, err := ac.feed.GetFeeds(ac.ctx, feed.GetFeedsArgs{})
 	if err != nil {
 		return err
 	}
@@ -624,7 +611,7 @@ func (ac *AzureClient) ListFeedsPackages() error {
 	for _, f := range *feeds {
 		log.Printf("[Azure DevOps] Listing packages - feed: %s", *f.Name)
 
-		packages, err := ac.f.GetPackages(ac.ctx, feed.GetPackagesArgs{FeedId: f.FullyQualifiedId})
+		packages, err := ac.feed.GetPackages(ac.ctx, feed.GetPackagesArgs{FeedId: f.FullyQualifiedId})
 		if err != nil {
 			log.Errorf("%v\n\n", err)
 			continue
@@ -648,6 +635,31 @@ func (ac *AzureClient) ListFeedsPackages() error {
 
 		fmt.Println()
 	}
+
+	return nil
+}
+
+func (ac *AzureClient) ListOrgMembers() error {
+	log.Println("[Azure DevOps] Listing organization members")
+
+	headers := table.Row{"DISPLAY NAME", "MAIL"}
+	results := []table.Row{}
+
+	args := graph.ListUsersArgs{}
+
+	members, err := ac.graph.ListUsers(ac.ctx, args)
+	if err != nil {
+		return fmt.Errorf("error listing org members - err: %v", err)
+	}
+
+	for _, member := range *members.GraphUsers {
+		results = append(results, table.Row{
+			*member.DisplayName,
+			*member.MailAddress,
+		})
+	}
+
+	CreateTable(headers, results)
 
 	return nil
 }
@@ -683,13 +695,25 @@ func NewAzureClient(cmd *cobra.Command, args []string) {
 
 	lclient := location.NewClient(ctx, conn)
 
+	graphClient, err := graph.NewClient(ctx, conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	taskAgentClient, err := taskagent.NewClient(ctx, conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	az.ctx = ctx
-	az.c = client
-	az.g = gclient
-	az.p = pclient
-	az.f = fclient
-	az.b = bclient
-	az.l = lclient
+	az.core = client
+	az.git = gclient
+	az.pipelines = pclient
+	az.feed = fclient
+	az.build = bclient
+	az.location = lclient
+	az.graph = graphClient
+	az.taskagent = taskAgentClient
 
 	AZ = az
 }
@@ -850,6 +874,19 @@ var azureListOrgPackagesCmd = &cobra.Command{
 	},
 }
 
+var azureListOrgMembersCmd = &cobra.Command{
+	Use:    "list-org-members",
+	Short:  "List organization members",
+	Long:   `List organization members`,
+	PreRun: NewAzureClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := AZ.ListOrgMembers(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(azureCmd)
 
@@ -864,6 +901,7 @@ func init() {
 	azureCmd.AddCommand(azureWhoamiCmd)
 	azureCmd.AddCommand(azureListOrgFeedsCmd)
 	azureCmd.AddCommand(azureListOrgPackagesCmd)
+	azureCmd.AddCommand(azureListOrgMembersCmd)
 
 	azureCmd.PersistentFlags().StringVarP(&AZURE_ORG_URL, "org", "o", "", "Organization URL (Ex: https://dev.azure.com/myorg)")
 	azureCmd.PersistentFlags().StringVarP(&AZURE_TOKEN, "token", "t", "", "Access Token")

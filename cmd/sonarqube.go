@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,6 +26,8 @@ var (
 	SONARQUBE_USER_LIST string
 	SONARQUBE_PROJECTS  string
 	SONARQUBE_ISSUES    string
+	SONARQUBE_QUALIFIER string
+	SONARQUBE_METHOD    string
 	SQ                  Sonar
 )
 
@@ -134,12 +136,14 @@ func (s *Sonar) Authenticate(server string, user string, password string) error 
 	}
 	defer rsp.Body.Close()
 
-	decoder := json.NewDecoder(rsp.Body)
-
-	token_validation := TokenValidation{}
-
-	err = decoder.Decode(&token_validation)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
+		return fmt.Errorf("error reading response - err: %v", err)
+	}
+
+	var token_validation TokenValidation
+
+	if err := json.Unmarshal(data, &token_validation); err != nil {
 		return fmt.Errorf("error in JSON unmarshal - err: %v", err)
 	}
 
@@ -155,8 +159,7 @@ func (s *Sonar) Authenticate(server string, user string, password string) error 
 }
 
 func (s *Sonar) AuthenticateByToken(server string, token string) error {
-	err := s.Authenticate(server, token, "")
-	if err != nil {
+	if err := s.Authenticate(server, token, ""); err != nil {
 		return err
 	}
 
@@ -197,11 +200,14 @@ func (s *Sonar) ListUsers() error {
 		}
 		defer rsp.Body.Close()
 
-		decoder := json.NewDecoder(rsp.Body)
-		search := UserSearch{}
-
-		err = decoder.Decode(&search)
+		data, err := io.ReadAll(rsp.Body)
 		if err != nil {
+			return fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var search UserSearch
+
+		if err := json.Unmarshal(data, &search); err != nil {
 			return fmt.Errorf("error in JSON unmarshal - err: %v", err)
 		}
 
@@ -237,7 +243,7 @@ func (s *Sonar) ListProjects() error {
 		return err
 	}
 
-	for _, component := range components {
+	for _, component := range *components {
 		results = append(results, table.Row{
 			component.Name,
 			component.Key,
@@ -252,14 +258,14 @@ func (s *Sonar) ListProjects() error {
 	return nil
 }
 
-func (s *Sonar) GetProjectsList() ([]Component, error) {
+func (s *Sonar) GetProjectsList() (*[]Component, error) {
 	projects := []Component{}
 
 	endpoint := fmt.Sprintf("%s/api/projects/search", s.Server)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
-		return projects, fmt.Errorf("error in GET request - err: %v", err)
+		return nil, fmt.Errorf("error in GET request - err: %v", err)
 	}
 
 	if len(SONARQUBE_USER) > 0 {
@@ -281,16 +287,19 @@ func (s *Sonar) GetProjectsList() ([]Component, error) {
 
 		rsp, err := s.Client.Do(req)
 		if err != nil {
-			return projects, fmt.Errorf("error in list projects - err: %v", err)
+			return nil, fmt.Errorf("error in list projects - err: %v", err)
 		}
 		defer rsp.Body.Close()
 
-		decoder := json.NewDecoder(rsp.Body)
-		search := ProjectSearch{}
-
-		err = decoder.Decode(&search)
+		data, err := io.ReadAll(rsp.Body)
 		if err != nil {
-			return projects, fmt.Errorf("error in JSON unmarshal - err: %v", err)
+			return nil, fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var search ProjectSearch
+
+		if err := json.Unmarshal(data, &search); err != nil {
+			return nil, fmt.Errorf("error in JSON unmarshal - err: %v", err)
 		}
 
 		projects = append(projects, search.Components...)
@@ -301,7 +310,61 @@ func (s *Sonar) GetProjectsList() ([]Component, error) {
 		}
 	}
 
-	return projects, nil
+	return &projects, nil
+}
+
+func (s *Sonar) GetComponentsList(qualifier string) (*[]Component, error) {
+	endpoint := fmt.Sprintf("%s/api/components/search", s.Server)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error in GET request - err: %v", err)
+	}
+
+	if len(SONARQUBE_USER) > 0 {
+		req.SetBasicAuth(s.User, s.Password)
+	}
+
+	page := 1
+	page_size := 50
+	qualifiers := qualifier
+	var components []Component
+
+	for {
+		params := url.Values{
+			"p":          {fmt.Sprint(page)},
+			"ps":         {fmt.Sprint(page_size)},
+			"qualifiers": {qualifiers},
+		}
+
+		req.URL.RawQuery = params.Encode()
+
+		rsp, err := s.Client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("error in list components - err: %v", err)
+		}
+		defer rsp.Body.Close()
+
+		data, err := io.ReadAll(rsp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var search ProjectSearch
+
+		if err := json.Unmarshal(data, &search); err != nil {
+			return nil, fmt.Errorf("error in JSON unmarshal - err: %v", err)
+		}
+
+		components = append(components, search.Components...)
+
+		page++
+		if len(search.Components) < page_size {
+			break
+		}
+	}
+
+	return &components, nil
 }
 
 func (s *Sonar) ListProjectFiles(project_key string) ([]Component, error) {
@@ -338,11 +401,14 @@ func (s *Sonar) ListProjectFiles(project_key string) ([]Component, error) {
 		}
 		defer rsp.Body.Close()
 
-		decoder := json.NewDecoder(rsp.Body)
-		tree := ComponentTree{}
-
-		err = decoder.Decode(&tree)
+		data, err := io.ReadAll(rsp.Body)
 		if err != nil {
+			return files, fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var tree ComponentTree
+
+		if err := json.Unmarshal(data, &tree); err != nil {
 			return files, fmt.Errorf("error in JSON unmarshal - err: %v", err)
 		}
 
@@ -381,7 +447,7 @@ func (s *Sonar) GetFileSource(file_key string) ([]byte, error) {
 	}
 	defer rsp.Body.Close()
 
-	data, err := ioutil.ReadAll(rsp.Body)
+	data, err := io.ReadAll(rsp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error in ReadAll - err: %v", err)
 	}
@@ -418,46 +484,18 @@ func (s *Sonar) DownloadProjectWorker(projects chan Component, wg *sync.WaitGrou
 				os.MkdirAll(path, os.ModePerm)
 			}
 
-			err = ioutil.WriteFile(
+			err = os.WriteFile(
 				fmt.Sprintf("%s/%s/%s", SONARQUBE_PROJECTS, project.Name, f.Path),
 				source,
 				0644,
 			)
 			if err != nil {
-				log.Error("error writing file - err: %v", err)
+				log.Errorf("error writing file - err: %v", err)
 			}
 		}
 
 		log.Printf("Project: %s - Download finished!", project.Name)
 	}
-}
-
-func (s *Sonar) DownloadAllProjects() {
-	log.Println("[Sonarqube] Downloading projects")
-
-	workers := 10
-
-	var wg sync.WaitGroup
-	wg.Add(workers)
-
-	projects := make(chan Component)
-
-	for i := 0; i < workers; i++ {
-		go s.DownloadProjectWorker(projects, &wg)
-	}
-
-	components, err := s.GetProjectsList()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for _, component := range components {
-		projects <- component
-	}
-
-	close(projects)
-
-	wg.Wait()
 }
 
 func (s *Sonar) ListIssues() error {
@@ -499,12 +537,14 @@ func (s *Sonar) ListIssues() error {
 		}
 		defer rsp.Body.Close()
 
-		decoder := json.NewDecoder(rsp.Body)
-
-		search := IssueSearch{}
-
-		err = decoder.Decode(&search)
+		data, err := io.ReadAll(rsp.Body)
 		if err != nil {
+			return fmt.Errorf("error reading response - err: %v", err)
+		}
+
+		var search IssueSearch
+
+		if err := json.Unmarshal(data, &search); err != nil {
 			return fmt.Errorf("error in JSON unmarshal - err: %v", err)
 		}
 
@@ -517,7 +557,7 @@ func (s *Sonar) ListIssues() error {
 				continue
 			}
 
-			ioutil.WriteFile(
+			os.WriteFile(
 				fmt.Sprintf("%s/%s/%s.txt", SONARQUBE_ISSUES, issue.Severity, issue.Key),
 				data,
 				0644,
@@ -539,13 +579,11 @@ func NewSonarClient(cmd *cobra.Command, args []string) {
 	}
 
 	if len(SONARQUBE_TOKEN) > 1 {
-		err := sonar.AuthenticateByToken(SONARQUBE_SERVER, SONARQUBE_TOKEN)
-		if err != nil {
+		if err := sonar.AuthenticateByToken(SONARQUBE_SERVER, SONARQUBE_TOKEN); err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		err := sonar.Authenticate(SONARQUBE_SERVER, SONARQUBE_USER, SONARQUBE_PASSWORD)
-		if err != nil {
+		if err := sonar.Authenticate(SONARQUBE_SERVER, SONARQUBE_USER, SONARQUBE_PASSWORD); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -606,11 +644,14 @@ var sonarListUsersCmd = &cobra.Command{
 			}
 			defer rsp.Body.Close()
 
-			decoder := json.NewDecoder(rsp.Body)
-			search := UserSearch{}
-
-			err = decoder.Decode(&search)
+			data, err := io.ReadAll(rsp.Body)
 			if err != nil {
+				log.Fatal(err)
+			}
+
+			var search UserSearch
+
+			if err := json.Unmarshal(data, &search); err != nil {
 				log.Fatalf("error in JSON unmarshal - err: %v", err)
 			}
 
@@ -651,7 +692,7 @@ var sonarListProjectsCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
-		for _, component := range components {
+		for _, component := range *components {
 			results = append(results, table.Row{
 				component.Name,
 				component.Key,
@@ -662,6 +703,39 @@ var sonarListProjectsCmd = &cobra.Command{
 		}
 
 		CreateTable(header, results)
+	},
+}
+
+var sonarListComponentsCmd = &cobra.Command{
+	Use:    "list-components",
+	Short:  "List Sonarqube Components",
+	Long:   `List Sonarqube Components`,
+	PreRun: NewSonarClient,
+
+	Run: func(cmd *cobra.Command, args []string) {
+		switch SONARQUBE_QUALIFIER {
+		case "APP", "VW", "SVW", "TRK":
+			log.Println("[Sonarqube] Listing components")
+
+			header := table.Row{"KEY", "QUALIFIER"}
+			results := []table.Row{}
+
+			components, err := SQ.GetComponentsList(SONARQUBE_QUALIFIER)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for _, component := range *components {
+				results = append(results, table.Row{
+					component.Key,
+					component.Qualifier,
+				})
+			}
+
+			CreateTable(header, results)
+		default:
+			log.Fatal("invalid qualifier type (use APP, VW, SVW or TRK)")
+		}
 	},
 }
 
@@ -685,12 +759,25 @@ var sonarDownloadProjectsCmd = &cobra.Command{
 			go SQ.DownloadProjectWorker(projects, &wg)
 		}
 
-		components, err := SQ.GetProjectsList()
-		if err != nil {
-			log.Fatal(err)
+		var components *[]Component
+		var err error
+
+		switch SONARQUBE_METHOD {
+		case "projects":
+			components, err = SQ.GetProjectsList()
+			if err != nil {
+				log.Fatal(err)
+			}
+		case "components":
+			components, err = SQ.GetComponentsList("TRK")
+			if err != nil {
+				log.Fatal(err)
+			}
+		default:
+			log.Fatal("invalid method (use 'projects' or 'components')")
 		}
 
-		for _, component := range components {
+		for _, component := range *components {
 			projects <- component
 		}
 
@@ -745,12 +832,14 @@ var sonarListIssuesCmd = &cobra.Command{
 			}
 			defer rsp.Body.Close()
 
-			decoder := json.NewDecoder(rsp.Body)
+			data, err := io.ReadAll(rsp.Body)
+			if err != nil {
+				log.Fatalf("error reading response - err: %v", err)
+			}
 
 			search := IssueSearch{}
 
-			err = decoder.Decode(&search)
-			if err != nil {
+			if json.Unmarshal(data, &search); err != nil {
 				log.Fatalf("error in JSON unmarshal - err: %v", err)
 			}
 
@@ -763,7 +852,7 @@ var sonarListIssuesCmd = &cobra.Command{
 					continue
 				}
 
-				ioutil.WriteFile(
+				os.WriteFile(
 					fmt.Sprintf("%s/%s/%s.txt", SONARQUBE_ISSUES, issue.Severity, issue.Key),
 					data,
 					0644,
@@ -829,6 +918,7 @@ func init() {
 	sonarqubeCmd.AddCommand(sonarListProjectsCmd)
 	sonarqubeCmd.AddCommand(sonarDownloadProjectsCmd)
 	sonarqubeCmd.AddCommand(sonarListIssuesCmd)
+	sonarqubeCmd.AddCommand(sonarListComponentsCmd)
 	sonarqubeCmd.AddCommand(sonarqubeSprayCmd)
 
 	sonarqubeCmd.PersistentFlags().StringVarP(&SONARQUBE_SERVER, "server", "s", "", "Server address")
@@ -836,7 +926,9 @@ func init() {
 	sonarqubeCmd.PersistentFlags().StringVarP(&SONARQUBE_PASSWORD, "password", "p", "", "Password")
 	sonarqubeCmd.PersistentFlags().StringVarP(&SONARQUBE_TOKEN, "token", "t", "", "Token")
 
-	sonarqubeSprayCmd.PersistentFlags().StringVarP(&SONARQUBE_USER_LIST, "userlist", "l", "", "User list")
+	sonarListComponentsCmd.Flags().StringVarP(&SONARQUBE_QUALIFIER, "qualifier", "q", "", "Qualifier (APP, VW, SVW or TRK)")
+	sonarDownloadProjectsCmd.Flags().StringVarP(&SONARQUBE_METHOD, "method", "m", "projects", "List projects method (use 'projects' or 'components' endpoint)")
+	sonarqubeSprayCmd.Flags().StringVarP(&SONARQUBE_USER_LIST, "userlist", "l", "", "User list")
 
 	var err error
 
